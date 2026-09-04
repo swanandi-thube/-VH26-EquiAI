@@ -1,5 +1,5 @@
 /**
- * Main Application Component for ADAPTIVECACHE Platform
+ * Main Application Component for ADAPTIVECACHE Platform (Warm Tech Theme)
  */
 
 import React, { useState } from 'react';
@@ -26,7 +26,7 @@ export const App: React.FC = () => {
   return (
     <TelemetryProvider>
       <Router>
-        <div className="min-h-screen flex flex-col bg-dark-950 text-slate-100 selection:bg-brand-cyan/20 selection:text-brand-cyan">
+        <div className="min-h-screen flex flex-col bg-dark-950 text-stone-100 selection:bg-amber-500/20 selection:text-amber-300">
           {/* Top Observability Header */}
           <Header />
 
@@ -37,7 +37,7 @@ export const App: React.FC = () => {
               setIsCollapsed={setIsSidebarCollapsed}
             />
 
-            <main className="flex-1 overflow-y-auto bg-[#07090E]">
+            <main className="flex-1 overflow-y-auto bg-dark-950">
               <Routes>
                 <Route path="/" element={<DashboardPage />} />
                 <Route path="/intelligence" element={<IntelligencePage />} />

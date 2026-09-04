@@ -1,5 +1,5 @@
 /**
- * Traffic Lab & Real Workload Controller Page
+ * Traffic Lab & Real Workload Controller Page (Warm Tech Theme)
  * Executes real reproducible traffic scenarios through the live pipeline with real-time streaming metrics.
  */
 
@@ -20,8 +20,6 @@ import {
 } from 'lucide-react';
 import {
   ResponsiveContainer,
-  AreaChart,
-  Area,
   LineChart,
   Line,
   XAxis,
@@ -75,7 +73,7 @@ export const TrafficLabPage: React.FC = () => {
       type: 'TRAFFIC_SPIKE',
       name: 'Sudden Hotspot Surge',
       description: 'Instant 10x-50x burst concentrated on 3 specific hot items.',
-      iconColor: 'text-brand-cyan',
+      iconColor: 'text-amber-400',
       defaultRps: 250,
       defaultLatency: 90,
       defaultError: 0.0,
@@ -84,7 +82,7 @@ export const TrafficLabPage: React.FC = () => {
       type: 'COLD_START',
       name: 'Cold Start Sweep',
       description: 'Empties cache and warms it with rapid multi-key lookups.',
-      iconColor: 'text-blue-400',
+      iconColor: 'text-orange-400',
       defaultRps: 150,
       defaultLatency: 75,
       defaultError: 0.0,
@@ -93,7 +91,7 @@ export const TrafficLabPage: React.FC = () => {
       type: 'POPULARITY_SHIFT',
       name: 'Popularity Drift',
       description: 'Concept drift shifting the active hot key cluster over time.',
-      iconColor: 'text-brand-purple',
+      iconColor: 'text-amber-300',
       defaultRps: 140,
       defaultLatency: 70,
       defaultError: 0.0,
@@ -111,7 +109,7 @@ export const TrafficLabPage: React.FC = () => {
       type: 'COMPUTE_HEAVY',
       name: 'Compute-Heavy Recompute',
       description: 'Complex aggregation queries with high CPU cost & long query time.',
-      iconColor: 'text-amber-400',
+      iconColor: 'text-orange-400',
       defaultRps: 90,
       defaultLatency: 320,
       defaultError: 0.0,
@@ -120,7 +118,7 @@ export const TrafficLabPage: React.FC = () => {
       type: 'READ_HEAVY',
       name: 'Read-Heavy Catalog (98%)',
       description: 'Heavy repeat read volume on top 20% cached assets.',
-      iconColor: 'text-teal-400',
+      iconColor: 'text-emerald-400',
       defaultRps: 220,
       defaultLatency: 45,
       defaultError: 0.0,
@@ -129,7 +127,7 @@ export const TrafficLabPage: React.FC = () => {
       type: 'WRITE_HEAVY',
       name: 'Write & Invalidation Churn',
       description: 'Frequent mutations forcing cache invalidation & eviction cycles.',
-      iconColor: 'text-red-400',
+      iconColor: 'text-rose-400',
       defaultRps: 110,
       defaultLatency: 110,
       defaultError: 0.05,
@@ -179,11 +177,11 @@ export const TrafficLabPage: React.FC = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold text-white flex items-center gap-2">
-            <FlaskConical className="w-5 h-5 text-brand-cyan" />
+          <h1 className="text-xl font-bold text-stone-100 flex items-center gap-2">
+            <FlaskConical className="w-5 h-5 text-amber-400" />
             Traffic Lab & Real Workload Controller
           </h1>
-          <p className="text-xs text-slate-400 mt-0.5">
+          <p className="text-xs text-stone-400 mt-0.5">
             Generate and stream real reproducible workloads against the AdaptiveCache pipeline
           </p>
         </div>
@@ -202,9 +200,9 @@ export const TrafficLabPage: React.FC = () => {
             <button
               onClick={handleStartTest}
               disabled={isStarting}
-              className="flex items-center gap-2 px-6 py-2.5 bg-brand-cyan hover:bg-cyan-400 text-black font-extrabold text-xs font-mono rounded-xl shadow-lg shadow-brand-cyan/20 transition-all cursor-pointer"
+              className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-stone-950 font-extrabold text-xs font-mono rounded-xl shadow-lg shadow-amber-500/20 transition-all cursor-pointer"
             >
-              <Play className="w-4 h-4 fill-black" />
+              <Play className="w-4 h-4 fill-stone-950" />
               {isStarting ? 'STARTING...' : 'START TEST'}
             </button>
           )}
@@ -221,17 +219,17 @@ export const TrafficLabPage: React.FC = () => {
               onClick={() => !isWorkloadRunning && handleSelectPreset(preset)}
               className={`p-3.5 rounded-xl border transition-all cursor-pointer ${
                 isSelected
-                  ? 'bg-dark-800 border-brand-cyan shadow-md shadow-brand-cyan/10'
+                  ? 'bg-dark-800 border-amber-500 shadow-md shadow-amber-500/10'
                   : 'bg-dark-900 border-dark-750 hover:border-dark-700'
               } ${isWorkloadRunning ? 'opacity-60 cursor-not-allowed' : ''}`}
             >
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs font-bold text-white">{preset.name}</span>
+                <span className="text-xs font-bold text-stone-100">{preset.name}</span>
                 <span className={`text-[10px] font-mono font-bold ${preset.iconColor}`}>
                   {preset.defaultRps} RPS
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed">
+              <p className="text-[11px] text-stone-400 line-clamp-2 leading-relaxed">
                 {preset.description}
               </p>
             </div>
@@ -245,8 +243,8 @@ export const TrafficLabPage: React.FC = () => {
         <div className="bg-dark-900 border border-dark-750 rounded-xl p-5 shadow-sm space-y-4">
           <div className="flex items-center justify-between pb-3 border-b border-dark-750">
             <div className="flex items-center gap-2">
-              <Sliders className="w-4 h-4 text-brand-cyan" />
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-200">
+              <Sliders className="w-4 h-4 text-amber-400" />
+              <span className="text-xs font-bold uppercase tracking-wider text-stone-200">
                 Workload Parameters
               </span>
             </div>
@@ -255,9 +253,9 @@ export const TrafficLabPage: React.FC = () => {
           <div className="space-y-3.5 text-xs font-mono">
             {/* RPS */}
             <div>
-              <div className="flex justify-between text-slate-300 mb-1">
+              <div className="flex justify-between text-stone-300 mb-1">
                 <span>Target Request Rate:</span>
-                <span className="text-brand-cyan font-bold">{rps} RPS</span>
+                <span className="text-amber-400 font-bold">{rps} RPS</span>
               </div>
               <input
                 type="range"
@@ -267,15 +265,15 @@ export const TrafficLabPage: React.FC = () => {
                 value={rps}
                 disabled={isWorkloadRunning}
                 onChange={(e) => setRps(parseInt(e.target.value, 10))}
-                className="w-full accent-brand-cyan bg-dark-800 rounded-lg cursor-pointer"
+                className="w-full accent-amber-500 bg-dark-800 rounded-lg cursor-pointer"
               />
             </div>
 
             {/* Multiplier */}
             <div>
-              <div className="flex justify-between text-slate-300 mb-1">
+              <div className="flex justify-between text-stone-300 mb-1">
                 <span>Traffic Multiplier:</span>
-                <span className="text-brand-purple font-bold">{multiplier.toFixed(1)}x</span>
+                <span className="text-orange-400 font-bold">{multiplier.toFixed(1)}x</span>
               </div>
               <input
                 type="range"
@@ -285,15 +283,15 @@ export const TrafficLabPage: React.FC = () => {
                 value={multiplier}
                 disabled={isWorkloadRunning}
                 onChange={(e) => setMultiplier(parseFloat(e.target.value))}
-                className="w-full accent-brand-purple bg-dark-800 rounded-lg cursor-pointer"
+                className="w-full accent-orange-500 bg-dark-800 rounded-lg cursor-pointer"
               />
             </div>
 
             {/* Object Count */}
             <div>
-              <div className="flex justify-between text-slate-300 mb-1">
+              <div className="flex justify-between text-stone-300 mb-1">
                 <span>Catalog Objects:</span>
-                <span className="text-white font-bold">{objectCount} items</span>
+                <span className="text-stone-100 font-bold">{objectCount} items</span>
               </div>
               <input
                 type="range"
@@ -303,13 +301,13 @@ export const TrafficLabPage: React.FC = () => {
                 value={objectCount}
                 disabled={isWorkloadRunning}
                 onChange={(e) => setObjectCount(parseInt(e.target.value, 10))}
-                className="w-full accent-brand-blue bg-dark-800 rounded-lg cursor-pointer"
+                className="w-full accent-amber-400 bg-dark-800 rounded-lg cursor-pointer"
               />
             </div>
 
             {/* Cache Capacity */}
             <div>
-              <div className="flex justify-between text-slate-300 mb-1">
+              <div className="flex justify-between text-stone-300 mb-1">
                 <span>Cache Capacity:</span>
                 <span className="text-brand-emerald font-bold">{cacheCapacityMb} MB</span>
               </div>
@@ -327,7 +325,7 @@ export const TrafficLabPage: React.FC = () => {
 
             {/* Backend Latency */}
             <div>
-              <div className="flex justify-between text-slate-300 mb-1">
+              <div className="flex justify-between text-stone-300 mb-1">
                 <span>Simulated DB Latency:</span>
                 <span className="text-amber-400 font-bold">{backendLatencyMs} ms</span>
               </div>
@@ -339,13 +337,13 @@ export const TrafficLabPage: React.FC = () => {
                 value={backendLatencyMs}
                 disabled={isWorkloadRunning}
                 onChange={(e) => setBackendLatencyMs(parseInt(e.target.value, 10))}
-                className="w-full accent-amber-400 bg-dark-800 rounded-lg cursor-pointer"
+                className="w-full accent-amber-500 bg-dark-800 rounded-lg cursor-pointer"
               />
             </div>
 
             {/* Backend Error Rate */}
             <div>
-              <div className="flex justify-between text-slate-300 mb-1">
+              <div className="flex justify-between text-stone-300 mb-1">
                 <span>Simulated Error Rate:</span>
                 <span className="text-brand-rose font-bold">{(backendErrorRate * 100).toFixed(0)}%</span>
               </div>
@@ -363,9 +361,9 @@ export const TrafficLabPage: React.FC = () => {
 
             {/* Duration */}
             <div>
-              <div className="flex justify-between text-slate-300 mb-1">
+              <div className="flex justify-between text-stone-300 mb-1">
                 <span>Test Duration:</span>
-                <span className="text-white font-bold">{duration} seconds</span>
+                <span className="text-stone-100 font-bold">{duration} seconds</span>
               </div>
               <input
                 type="range"
@@ -375,7 +373,7 @@ export const TrafficLabPage: React.FC = () => {
                 value={duration}
                 disabled={isWorkloadRunning}
                 onChange={(e) => setDuration(parseInt(e.target.value, 10))}
-                className="w-full accent-white bg-dark-800 rounded-lg cursor-pointer"
+                className="w-full accent-stone-200 bg-dark-800 rounded-lg cursor-pointer"
               />
             </div>
           </div>
@@ -386,30 +384,30 @@ export const TrafficLabPage: React.FC = () => {
           {/* Real-time Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="bg-dark-900 border border-dark-750 rounded-xl p-3">
-              <span className="text-[10px] font-mono text-slate-400 uppercase">Live RPS</span>
-              <div className="text-xl font-bold font-mono text-brand-cyan mt-1">
+              <span className="text-[10px] font-mono text-stone-400 uppercase">Live RPS</span>
+              <div className="text-xl font-bold font-mono text-amber-400 mt-1">
                 {telemetry?.requestsPerSecond ?? 0}
               </div>
             </div>
 
             <div className="bg-dark-900 border border-dark-750 rounded-xl p-3">
-              <span className="text-[10px] font-mono text-slate-400 uppercase">Cache Hit Rate</span>
+              <span className="text-[10px] font-mono text-stone-400 uppercase">Cache Hit Rate</span>
               <div className="text-xl font-bold font-mono text-brand-emerald mt-1">
                 {telemetry ? `${(telemetry.cacheHitRate * 100).toFixed(1)}%` : '0%'}
               </div>
             </div>
 
             <div className="bg-dark-900 border border-dark-750 rounded-xl p-3">
-              <span className="text-[10px] font-mono text-slate-400 uppercase">Backend Miss Load</span>
-              <div className="text-xl font-bold font-mono text-blue-400 mt-1">
+              <span className="text-[10px] font-mono text-stone-400 uppercase">Backend Miss Load</span>
+              <div className="text-xl font-bold font-mono text-orange-400 mt-1">
                 {telemetry ? `${(telemetry.backendLoadRatio * 100).toFixed(1)}%` : '0%'}
               </div>
             </div>
 
             <div className="bg-dark-900 border border-dark-750 rounded-xl p-3">
-              <span className="text-[10px] font-mono text-slate-400 uppercase">Circuit Breaker</span>
+              <span className="text-[10px] font-mono text-stone-400 uppercase">Circuit Breaker</span>
               <div className={`text-sm font-bold font-mono mt-1 ${
-                telemetry?.circuitBreakerState === 'CLOSED' ? 'text-brand-emerald' : 'text-brand-amber'
+                telemetry?.circuitBreakerState === 'CLOSED' ? 'text-brand-emerald' : 'text-amber-400'
               }`}>
                 {telemetry?.circuitBreakerState || 'CLOSED'}
               </div>
@@ -419,10 +417,10 @@ export const TrafficLabPage: React.FC = () => {
           {/* Real-time Traffic Graph */}
           <div className="bg-dark-900 border border-dark-750 rounded-xl p-4 shadow-sm">
             <div className="flex items-center justify-between mb-4">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-200">
+              <span className="text-xs font-bold uppercase tracking-wider text-stone-200">
                 Live Traffic Stream (RPS & Average Latency)
               </span>
-              <span className="text-[10px] font-mono text-brand-cyan bg-brand-cyan/10 px-2 py-0.5 rounded border border-brand-cyan/20">
+              <span className="text-[10px] font-mono text-amber-400 bg-amber-500/10 px-2.5 py-0.5 rounded-lg border border-amber-500/20">
                 Real Request Dispatch
               </span>
             </div>
@@ -430,13 +428,13 @@ export const TrafficLabPage: React.FC = () => {
             <div className="h-64 w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={history}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1E293B" />
-                  <XAxis dataKey="time" stroke="#64748B" tick={{ fontSize: 10 }} />
-                  <YAxis stroke="#64748B" tick={{ fontSize: 10 }} />
-                  <Tooltip contentStyle={{ backgroundColor: '#0B0F17', borderColor: '#334155', borderRadius: '8px', fontSize: '11px' }} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#26221f" />
+                  <XAxis dataKey="time" stroke="#78716c" tick={{ fontSize: 10 }} />
+                  <YAxis stroke="#78716c" tick={{ fontSize: 10 }} />
+                  <Tooltip contentStyle={{ backgroundColor: '#141210', borderColor: '#332c27', borderRadius: '8px', fontSize: '11px' }} />
                   <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
-                  <Line type="monotone" dataKey="rps" name="Incoming RPS" stroke="#00F0FF" strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="avgLatency" name="Average Latency (ms)" stroke="#8B5CF6" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="rps" name="Incoming RPS" stroke="#FBBF24" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="avgLatency" name="Average Latency (ms)" stroke="#EA580C" strokeWidth={2} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
             </div>

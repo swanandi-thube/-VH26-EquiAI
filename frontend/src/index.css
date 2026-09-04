@@ -4,27 +4,28 @@
 
 @layer base {
   body {
-    @apply bg-dark-950 text-slate-100 font-sans antialiased;
-    background-color: #07090E;
+    @apply bg-dark-950 text-stone-100 font-sans antialiased;
+    background-color: #0c0a09;
+    color: #f5f5f4;
   }
 
-  /* Custom high-density scrollbar */
+  /* Custom Warm Tech scrollbar */
   ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
   }
 
   ::-webkit-scrollbar-track {
-    background: #0B0F17;
+    background: #141210;
   }
 
   ::-webkit-scrollbar-thumb {
-    background: #1E293B;
+    background: #332c27;
     border-radius: 3px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: #334155;
+    background: #443a34;
   }
 }
 

@@ -8,23 +8,34 @@ export default {
   theme: {
     extend: {
       colors: {
+        // Sophisticated Warm Tech Palette (Warm Charcoal / Espresso / Stone)
         dark: {
-          950: '#07090E',
-          900: '#0B0F17',
-          850: '#0F1523',
-          800: '#141D2E',
-          750: '#1B263B',
-          700: '#22314E',
-          600: '#33476E',
-          500: '#4A6294',
+          950: '#0c0a09', // Deepest warm charcoal / near-black (stone-950)
+          900: '#141210', // Rich warm espresso background
+          850: '#1c1917', // Elevated warm surface (stone-900)
+          800: '#26221f', // Card elevation / active hover
+          750: '#332c27', // Subtle warm border accent
+          700: '#443a34', // Hover & highlighted border
+          600: '#574c44', // Muted warm border
+          500: '#78716c', // Stone-500 muted text
+          400: '#a8a29e', // Stone-400 secondary text
+          300: '#d6d3d1', // Stone-300 bright text
+          200: '#e7e5e4', // Stone-200 warm white
+          100: '#f5f5f4', // Stone-100 cream white
         },
+        // Warm Tech Accents (Amber, Warm Gold, Burnt Orange, Copper, Cream)
         brand: {
-          cyan: '#00F0FF',
-          blue: '#3B82F6',
-          emerald: '#10B981',
-          amber: '#F59E0B',
-          rose: '#EF4444',
-          purple: '#8B5CF6',
+          amber: '#F59E0B',      // Primary warm amber
+          gold: '#FBBF24',       // Radiant warm gold
+          orange: '#EA580C',     // Burnt orange / copper
+          copper: '#D97706',     // Metallic rich copper
+          terracotta: '#C2410C', // Deep warm terracotta
+          cream: '#FEF3C7',      // Warm cream / ivory
+          emerald: '#10B981',    // Warm tech green (healthy/savings)
+          rose: '#EF4444',       // Warm ruby / coral danger
+          purple: '#EA580C',     // Warm accent map
+          cyan: '#F59E0B',       // Warm amber alias for primary accent
+          blue: '#EA580C',       // Warm copper alias for secondary accent
         }
       },
       fontFamily: {
@@ -37,8 +48,8 @@ export default {
       },
       keyframes: {
         glow: {
-          '0%': { boxShadow: '0 0 5px rgba(0, 240, 255, 0.2)' },
-          '100%': { boxShadow: '0 0 20px rgba(0, 240, 255, 0.6)' },
+          '0%': { boxShadow: '0 0 5px rgba(245, 158, 11, 0.2)' },
+          '100%': { boxShadow: '0 0 20px rgba(245, 158, 11, 0.5)' },
         }
       }
     },
