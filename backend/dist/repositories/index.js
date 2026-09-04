@@ -23,3 +23,4 @@ __exportStar(require("./decisionRepository"), exports);
 __exportStar(require("./eventRepository"), exports);
 __exportStar(require("./settingsRepository"), exports);
 __exportStar(require("./workloadRepository"), exports);
+__exportStar(require("./observationRepository"), exports);

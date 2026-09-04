@@ -153,6 +153,22 @@ class MigrationRunner {
         CREATE INDEX IF NOT EXISTS idx_workload_requests_wid ON workload_requests(workload_id, row_index);
         CREATE INDEX IF NOT EXISTS idx_workload_requests_time ON workload_requests(workload_id, timestamp);
       `);
+            // 9. object_observations table (Phase 5 Time-Series Append-Only Store)
+            await client_1.dbClient.query(`
+        CREATE TABLE IF NOT EXISTS object_observations (
+          id BIGSERIAL PRIMARY KEY,
+          object_id VARCHAR(128) NOT NULL,
+          timestamp BIGINT NOT NULL,
+          request_count INT NOT NULL DEFAULT 1,
+          demand NUMERIC(10,2) NOT NULL DEFAULT 1.00,
+          price NUMERIC(10,2),
+          inventory INT,
+          backend_latency INT NOT NULL DEFAULT 0,
+          retrieval_cost INT NOT NULL DEFAULT 0,
+          response_size INT NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_object_observations_obj_time ON object_observations(object_id, timestamp DESC);
+      `);
             console.log('[Migrations] All PostgreSQL tables and indexes created successfully.');
             return true;
         }

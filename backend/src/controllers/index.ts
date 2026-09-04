@@ -10,3 +10,4 @@ export * from './benchmarkController';
 export * from './whatIfController';
 export * from './costController';
 export * from './protectionController';
+export * from './observationController';

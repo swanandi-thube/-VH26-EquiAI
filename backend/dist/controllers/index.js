@@ -25,3 +25,4 @@ __exportStar(require("./benchmarkController"), exports);
 __exportStar(require("./whatIfController"), exports);
 __exportStar(require("./costController"), exports);
 __exportStar(require("./protectionController"), exports);
+__exportStar(require("./observationController"), exports);

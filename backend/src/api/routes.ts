@@ -13,6 +13,7 @@ import {
   whatIfController,
   costController,
   protectionController,
+  observationController,
 } from '../controllers';
 import { telemetry } from '../telemetry';
 import { requestLogRepository } from '../repositories';
@@ -58,6 +59,12 @@ apiRouter.post('/cache/request/:id', (req: Request, res: Response) => cacheContr
 // --- Decisions & Explainability ---
 apiRouter.get('/cache/decisions', (req: Request, res: Response) => cacheController.getDecisions(req, res));
 apiRouter.get('/cache/decisions/:id/explain', (req: Request, res: Response) => cacheController.getDecisionExplanation(req, res));
+
+// --- Time-Series Observations & Change Detection (Phase 5) ---
+apiRouter.post('/observations/record', (req: Request, res: Response) => observationController.recordObservation(req, res));
+apiRouter.get('/observations', (req: Request, res: Response) => observationController.getAllObservations(req, res));
+apiRouter.get('/observations/:objectId', (req: Request, res: Response) => observationController.getObjectObservations(req, res));
+apiRouter.get('/observations/:objectId/changes', (req: Request, res: Response) => observationController.getObjectChanges(req, res));
 
 // --- Activity Stream & Audit Events ---
 apiRouter.get('/cache/events', (req: Request, res: Response) => cacheController.getEvents(req, res));

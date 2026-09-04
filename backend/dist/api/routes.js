@@ -47,6 +47,11 @@ exports.apiRouter.post('/cache/request/:id', (req, res) => controllers_1.cacheCo
 // --- Decisions & Explainability ---
 exports.apiRouter.get('/cache/decisions', (req, res) => controllers_1.cacheController.getDecisions(req, res));
 exports.apiRouter.get('/cache/decisions/:id/explain', (req, res) => controllers_1.cacheController.getDecisionExplanation(req, res));
+// --- Time-Series Observations & Change Detection (Phase 5) ---
+exports.apiRouter.post('/observations/record', (req, res) => controllers_1.observationController.recordObservation(req, res));
+exports.apiRouter.get('/observations', (req, res) => controllers_1.observationController.getAllObservations(req, res));
+exports.apiRouter.get('/observations/:objectId', (req, res) => controllers_1.observationController.getObjectObservations(req, res));
+exports.apiRouter.get('/observations/:objectId/changes', (req, res) => controllers_1.observationController.getObjectChanges(req, res));
 // --- Activity Stream & Audit Events ---
 exports.apiRouter.get('/cache/events', (req, res) => controllers_1.cacheController.getEvents(req, res));
 // --- Traffic Lab & Workload Ingestion ---

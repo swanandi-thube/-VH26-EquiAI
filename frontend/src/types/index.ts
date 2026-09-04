@@ -62,6 +62,43 @@ export interface ScoreFactors {
   finalScore: number;
 }
 
+export type DemandTrendType =
+  | 'DEMAND_SPIKE'
+  | 'DEMAND_DECLINE'
+  | 'STABLE_DEMAND'
+  | 'INCREASING_TREND'
+  | 'DECREASING_TREND';
+
+export interface ObjectObservationRecord {
+  id?: string;
+  objectId: string;
+  timestamp: number;
+  requestCount: number;
+  demand: number;
+  price?: number | null;
+  inventory?: number | null;
+  backendLatencyMs: number;
+  retrievalCostMs: number;
+  responseSizeBytes: number;
+}
+
+export interface ChangeDetectionResult {
+  objectId: string;
+  timestamp: number;
+  currentDemand: number;
+  previousDemand: number;
+  demandChange: number;
+  frequencyChange: number;
+  priceChange: number;
+  latencyChange: number;
+  detectedPattern: DemandTrendType;
+  trendVelocity: number;
+  sampleWindows: number;
+  historySummary: number[];
+  recommendedDecision?: DecisionType;
+  recommendedTtlSeconds?: number;
+}
+
 export interface DecisionRecord {
   id: string;
   objectId: string;
@@ -74,6 +111,7 @@ export interface DecisionRecord {
   confidence: number;
   reason: string;
   timestamp: number;
+  createdAt?: number;
 }
 
 export interface FactorAttribution {

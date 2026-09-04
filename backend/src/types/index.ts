@@ -69,6 +69,58 @@ export interface ScoreFactors {
   finalScore: number;      // Weighted combined score [0, 1]
 }
 
+export type DemandTrendType =
+  | 'DEMAND_SPIKE'
+  | 'DEMAND_DECLINE'
+  | 'STABLE_DEMAND'
+  | 'INCREASING_TREND'
+  | 'DECREASING_TREND';
+
+export interface ObjectObservationRecord {
+  id?: string;
+  objectId: string;
+  timestamp: number;
+  requestCount: number;
+  demand: number;
+  price?: number | null;
+  inventory?: number | null;
+  backendLatencyMs: number;
+  retrievalCostMs: number;
+  responseSizeBytes: number;
+}
+
+export interface ChangeDetectionResult {
+  objectId: string;
+  timestamp: number;
+  currentDemand: number;
+  previousDemand: number;
+  demandChange: number;       // ΔD: percentage change
+  frequencyChange: number;    // ΔF: percentage change
+  priceChange: number;        // ΔP: percentage change (contextual only)
+  latencyChange: number;      // ΔL: percentage change
+  detectedPattern: DemandTrendType;
+  trendVelocity: number;      // acceleration slope
+  sampleWindows: number;
+  historySummary: number[];   // e.g. [100, 150, 900]
+  recommendedDecision?: DecisionType;
+  recommendedTtlSeconds?: number;
+}
+
+export interface DecisionExplanation {
+  id?: string;
+  objectId: string;
+  decision: DecisionType;
+  decisionType?: DecisionType;
+  score: number;
+  adaptiveScore?: number;
+  reason: string;
+  factors?: ScoreFactors;
+  newTtl?: number;
+  previousTtl?: number;
+  createdAt: number;
+  timestamp?: number;
+}
+
 export interface DecisionRecord {
   id: string;
   objectId: string;
@@ -81,6 +133,7 @@ export interface DecisionRecord {
   confidence: number;
   reason: string;
   timestamp: number;
+  createdAt?: number;
 }
 
 export interface RequestLog {

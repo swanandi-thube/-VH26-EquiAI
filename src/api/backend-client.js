@@ -197,4 +197,26 @@ export class BackendClient {
       return { success: false, detail: err.message };
     }
   }
+
+  // --- Phase 4 & 5 Decision & Observation APIs ---
+
+  async recordObservation(obsData) {
+    return await this.postApi('observations/record', obsData);
+  }
+
+  async getObjectObservations(objectId, limit = 50) {
+    return await this.getApi(`observations/${objectId}?limit=${limit}`);
+  }
+
+  async getObjectChanges(objectId) {
+    return await this.getApi(`observations/${objectId}/changes`);
+  }
+
+  async getDecisions(limit = 50) {
+    return await this.getApi(`cache/decisions?limit=${limit}`);
+  }
+
+  async explainDecision(decisionId) {
+    return await this.getApi(`cache/decisions/${decisionId}/explain`);
+  }
 }

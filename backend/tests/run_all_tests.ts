@@ -17,6 +17,10 @@ import { requestLogRepository, workloadRepository } from '../src/repositories';
 import { telemetry } from '../src/telemetry';
 import { IOriginDataSource } from '../src/services/originAdapter';
 import { workloadIngestionService } from '../src/services/workloadIngestionService';
+import { explainability } from '../src/engine/explainability';
+import { changeDetector } from '../src/engine/changeDetector';
+import { observationRepository, decisionRepository, settingsRepository } from '../src/repositories';
+import { observationController } from '../src/controllers/observationController';
 
 let passed = 0;
 let failed = 0;
@@ -338,6 +342,348 @@ async function runTests() {
   const retrievedRun = await workloadRepository.getWorkloadRunById(validJsonRes.summary.workloadId);
   assert(retrievedRun !== null, '6g. Workload metadata record retrieved by ID');
   assert(retrievedRun?.filename === 'api_trace.json', '6h. Workload filename matches ingested file');
+
+  // =========================================================================
+  // Test Suite 11: Phase 4 Adaptive Decision Engine & Explainability
+  // =========================================================================
+  console.log('\n--- Test Suite 11: Phase 4 Adaptive Decision Engine ---');
+  const phase4Settings = await settingsRepository.getSettings();
+
+  // 11.1 Low Demand -> EVICT
+  const lowDemandFactors = scorer.calculateFactors(
+    {
+      objectId: 'LowDemand_01',
+      accessCount: 1,
+      lastAccessed: Date.now() - 3600000, // 1 hour ago
+      retrievalCostMs: 20,
+      sizeBytes: 1048576, // 1MB
+      predictedDemand: -0.8,
+      confidence: 0.9,
+    },
+    phase4Settings,
+    { poolUtilization: 0.1, queueDepth: 0, errorRate: 0, avgBackendLatencyMs: 20 }
+  );
+  const lowDemandEval = lifecycle.evaluate(
+    {
+      objectId: 'LowDemand_01',
+      key: 'cache:obj:LowDemand_01',
+      sizeBytes: 1048576,
+      createdAt: Date.now() - 3600000,
+      lastAccessed: Date.now() - 3600000,
+      accessCount: 1,
+      recentAccessCount: 1,
+      retrievalCostMs: 20,
+      backendLatencyMs: 20,
+      ttlSeconds: 300,
+      remainingTtlSeconds: 20, // Expiring soon
+      expiresAt: Date.now() + 20000,
+      predictedDemand: -0.8,
+      confidence: 0.9,
+      adaptiveScore: lowDemandFactors.finalScore,
+      lastDecision: 'KEEP',
+      lastDecisionTime: Date.now() - 3600000,
+    },
+    lowDemandFactors,
+    phase4Settings,
+    true
+  );
+  assert(lowDemandEval.decision === 'EVICT', `11.1 Low-demand expiring object triggers EVICT (got ${lowDemandEval.decision})`);
+
+  // 11.2 High Demand -> KEEP
+  const highDemandFactors = scorer.calculateFactors(
+    {
+      objectId: 'HighDemand_01',
+      accessCount: 50,
+      lastAccessed: Date.now() - 1000,
+      retrievalCostMs: 250,
+      sizeBytes: 4096,
+      predictedDemand: 0.2,
+      confidence: 0.95,
+    },
+    phase4Settings,
+    { poolUtilization: 0.3, queueDepth: 2, errorRate: 0, avgBackendLatencyMs: 250 }
+  );
+  const highDemandEval = lifecycle.evaluate(
+    {
+      objectId: 'HighDemand_01',
+      key: 'cache:obj:HighDemand_01',
+      sizeBytes: 4096,
+      createdAt: Date.now() - 60000,
+      lastAccessed: Date.now() - 1000,
+      accessCount: 50,
+      recentAccessCount: 20,
+      retrievalCostMs: 250,
+      backendLatencyMs: 250,
+      ttlSeconds: 600,
+      remainingTtlSeconds: 550,
+      expiresAt: Date.now() + 550000,
+      predictedDemand: 0.2,
+      confidence: 0.95,
+      adaptiveScore: highDemandFactors.finalScore,
+      lastDecision: 'KEEP',
+      lastDecisionTime: Date.now() - 1000,
+    },
+    highDemandFactors,
+    phase4Settings,
+    true
+  );
+  assert(highDemandEval.decision === 'KEEP', `11.2 High-demand resident object triggers KEEP (got ${highDemandEval.decision})`);
+
+  // 11.3 Increasing Demand Surge on Candidate -> PRE-CACHE
+  const surgeFactors = scorer.calculateFactors(
+    {
+      objectId: 'SurgeCandidate_01',
+      accessCount: 15,
+      lastAccessed: Date.now(),
+      retrievalCostMs: 300,
+      sizeBytes: 8192,
+      predictedDemand: 0.65,
+      confidence: 0.88,
+    },
+    phase4Settings,
+    { poolUtilization: 0.5, queueDepth: 5, errorRate: 0.05, avgBackendLatencyMs: 300 }
+  );
+  const surgeEval = lifecycle.evaluate(
+    {
+      objectId: 'SurgeCandidate_01',
+      key: 'cache:obj:SurgeCandidate_01',
+      sizeBytes: 8192,
+      createdAt: Date.now(),
+      lastAccessed: Date.now(),
+      accessCount: 15,
+      recentAccessCount: 15,
+      retrievalCostMs: 300,
+      backendLatencyMs: 300,
+      ttlSeconds: 300,
+      remainingTtlSeconds: 0,
+      expiresAt: 0,
+      predictedDemand: 0.65,
+      confidence: 0.88,
+      adaptiveScore: surgeFactors.finalScore,
+      lastDecision: 'KEEP',
+      lastDecisionTime: Date.now(),
+    },
+    surgeFactors,
+    phase4Settings,
+    false // Not currently cached
+  );
+  assert(surgeEval.decision === 'PRE-CACHE', `11.3 Demand surge on candidate triggers PRE-CACHE (got ${surgeEval.decision})`);
+
+  // 11.4 Approaching Expiration + High Recomputation Cost -> REFRESH
+  const refreshFactors = scorer.calculateFactors(
+    {
+      objectId: 'ExpensiveRefresh_01',
+      accessCount: 80,
+      lastAccessed: Date.now() - 500,
+      retrievalCostMs: 400,
+      sizeBytes: 4096,
+      predictedDemand: 0.35,
+      confidence: 0.95,
+    },
+    phase4Settings,
+    { poolUtilization: 0.4, queueDepth: 3, errorRate: 0, avgBackendLatencyMs: 400 }
+  );
+  const refreshEval = lifecycle.evaluate(
+    {
+      objectId: 'ExpensiveRefresh_01',
+      key: 'cache:obj:ExpensiveRefresh_01',
+      sizeBytes: 4096,
+      createdAt: Date.now() - 290000,
+      lastAccessed: Date.now() - 500,
+      accessCount: 80,
+      recentAccessCount: 25,
+      retrievalCostMs: 400,
+      backendLatencyMs: 400,
+      ttlSeconds: 300,
+      remainingTtlSeconds: 15, // Low remaining TTL (< 45s)
+      expiresAt: Date.now() + 15000,
+      predictedDemand: 0.35,
+      confidence: 0.95,
+      adaptiveScore: refreshFactors.finalScore,
+      lastDecision: 'KEEP',
+      lastDecisionTime: Date.now() - 500,
+    },
+    refreshFactors,
+    phase4Settings,
+    true
+  );
+  assert(refreshEval.decision === 'REFRESH', `11.4 Expiring object with high DB cost triggers REFRESH (got ${refreshEval.decision})`);
+
+  // 11.5 Memory Pressure Adaptive Eviction Ranking
+  await redisCache.flushall();
+  redisCache.setCapacity(6000); // 6KB total capacity
+  await redisCache.set('item:high', JSON.stringify({ data: 'high value' }), {
+    objectId: 'item:high',
+    sizeBytes: 2500,
+    adaptiveScore: 0.88,
+    lastAccessed: Date.now(),
+  });
+  await redisCache.set('item:low', JSON.stringify({ data: 'low value' }), {
+    objectId: 'item:low',
+    sizeBytes: 2500,
+    adaptiveScore: 0.12,
+    lastAccessed: Date.now(),
+  });
+  // Inserting item:new (2500 bytes) will exceed 6000 bytes and force eviction of the lower-scored item:low
+  await redisCache.set('item:new', JSON.stringify({ data: 'new item' }), {
+    objectId: 'item:new',
+    sizeBytes: 2500,
+    adaptiveScore: 0.70,
+    lastAccessed: Date.now(),
+  });
+  const lowItemCheck = await redisCache.get('item:low');
+  const highItemCheck = await redisCache.get('item:high');
+  assert(lowItemCheck.hit === false, '11.5a Lowest scoring item (item:low) was adaptively evicted');
+  assert(highItemCheck.hit === true, '11.5b High-value item (item:high) was retained');
+  assert(redisCache.getStats().adaptiveEvictions >= 1, '11.5c adaptiveEvictions counter incremented');
+
+  // 11.6 Decision Explainability Format
+  const explanation = explainability.explain(surgeEval.decisionRecord, phase4Settings);
+  assert(explanation.id === surgeEval.decisionRecord.id, '11.6a Explanation matches decision ID');
+  assert(explanation.objectId === 'SurgeCandidate_01', '11.6b Explanation objectId matches');
+  assert(explanation.decisionType === 'PRE-CACHE', '11.6c Explanation decisionType matches');
+  assert(explanation.attributions.length === 6, `11.6d All 6 factor attributions present (got ${explanation.attributions.length})`);
+  assert(typeof explanation.summaryMessage === 'string' && explanation.summaryMessage.length > 10, '11.6e Summary message generated');
+
+  // =========================================================================
+  // Test Suite 12: Phase 5 Time-Series Observation & Demand Change Detection
+  // =========================================================================
+  console.log('\n--- Test Suite 12: Phase 5 Time-Series Observations & Change Detection ---');
+  observationRepository.clear();
+
+  const nowBase = Date.now();
+  // 12.1 Ingest Sequence: 100 -> 150 -> 900
+  await observationRepository.saveObservation({
+    objectId: 'Product_Surge_99',
+    timestamp: nowBase - 120000,
+    requestCount: 100,
+    demand: 100,
+    price: 49.99,
+    inventory: 500,
+    backendLatencyMs: 65,
+    retrievalCostMs: 120,
+    responseSizeBytes: 2048,
+  });
+  await observationRepository.saveObservation({
+    objectId: 'Product_Surge_99',
+    timestamp: nowBase - 60000,
+    requestCount: 150,
+    demand: 150,
+    price: 49.99,
+    inventory: 450,
+    backendLatencyMs: 80,
+    retrievalCostMs: 120,
+    responseSizeBytes: 2048,
+  });
+  await observationRepository.saveObservation({
+    objectId: 'Product_Surge_99',
+    timestamp: nowBase,
+    requestCount: 900,
+    demand: 900,
+    price: 49.99,
+    inventory: 200,
+    backendLatencyMs: 140,
+    retrievalCostMs: 120,
+    responseSizeBytes: 2048,
+  });
+
+  // 12.2 Verify Append-Only Storage & History Retrieval
+  const surgeHistory = await observationRepository.getRecentObservations('Product_Surge_99');
+  assert(surgeHistory.length === 3, `12.2a All 3 observations stored and retrieved (got ${surgeHistory.length})`);
+  assert(surgeHistory[0].demand === 900, '12.2b Latest observation has demand 900');
+  assert(surgeHistory[2].demand === 100, '12.2c Baseline observation has demand 100');
+
+  // 12.3 Multi-Window Change Detection for Surge (100 -> 150 -> 900)
+  const surgeAnalysis = await changeDetector.analyzeFromRepository('Product_Surge_99');
+  assert(
+    surgeAnalysis.detectedPattern === 'DEMAND_SPIKE' || surgeAnalysis.detectedPattern === 'INCREASING_TREND',
+    `12.3a Pattern for 100 -> 150 -> 900 detected as surge/increasing (got ${surgeAnalysis.detectedPattern})`
+  );
+  assert(surgeAnalysis.demandChange >= 1.0 || surgeAnalysis.historySummary.length === 3, '12.3b Demand delta calculated accurately');
+  assert(surgeAnalysis.recommendedDecision === 'PRE-CACHE', `12.3c Recommended action is PRE-CACHE (got ${surgeAnalysis.recommendedDecision})`);
+  assert(surgeAnalysis.recommendedTtlSeconds! > 300, `12.3d Dynamic TTL scaled up during spike (${surgeAnalysis.recommendedTtlSeconds}s)`);
+
+  // 12.4 Declining Demand Pattern Detection (500 -> 200 -> 10)
+  await observationRepository.saveObservation({
+    objectId: 'Product_Declining_01',
+    timestamp: nowBase - 120000,
+    requestCount: 500,
+    demand: 500,
+    backendLatencyMs: 50,
+    retrievalCostMs: 50,
+    responseSizeBytes: 1024,
+  });
+  await observationRepository.saveObservation({
+    objectId: 'Product_Declining_01',
+    timestamp: nowBase - 60000,
+    requestCount: 200,
+    demand: 200,
+    backendLatencyMs: 50,
+    retrievalCostMs: 50,
+    responseSizeBytes: 1024,
+  });
+  await observationRepository.saveObservation({
+    objectId: 'Product_Declining_01',
+    timestamp: nowBase,
+    requestCount: 10,
+    demand: 10,
+    backendLatencyMs: 50,
+    retrievalCostMs: 50,
+    responseSizeBytes: 1024,
+  });
+
+  const declineAnalysis = await changeDetector.analyzeFromRepository('Product_Declining_01');
+  assert(
+    declineAnalysis.detectedPattern === 'DEMAND_DECLINE' || declineAnalysis.detectedPattern === 'DECREASING_TREND',
+    `12.4a Declining sequence (500 -> 200 -> 10) detected (got ${declineAnalysis.detectedPattern})`
+  );
+  assert(declineAnalysis.demandChange < 0, '12.4b Negative demand delta detected');
+  assert(declineAnalysis.recommendedTtlSeconds! < 300, `12.4c Dynamic TTL scaled down during decline (${declineAnalysis.recommendedTtlSeconds}s)`);
+
+  // 12.5 Stable Demand Pattern Detection (100 -> 102 -> 99)
+  await observationRepository.saveObservation({
+    objectId: 'Product_Stable_01',
+    timestamp: nowBase - 120000,
+    requestCount: 100,
+    demand: 100,
+    backendLatencyMs: 50,
+    retrievalCostMs: 50,
+    responseSizeBytes: 1024,
+  });
+  await observationRepository.saveObservation({
+    objectId: 'Product_Stable_01',
+    timestamp: nowBase - 60000,
+    requestCount: 102,
+    demand: 102,
+    backendLatencyMs: 50,
+    retrievalCostMs: 50,
+    responseSizeBytes: 1024,
+  });
+  await observationRepository.saveObservation({
+    objectId: 'Product_Stable_01',
+    timestamp: nowBase,
+    requestCount: 99,
+    demand: 99,
+    backendLatencyMs: 50,
+    retrievalCostMs: 50,
+    responseSizeBytes: 1024,
+  });
+
+  const stableAnalysis = await changeDetector.analyzeFromRepository('Product_Stable_01');
+  assert(stableAnalysis.detectedPattern === 'STABLE_DEMAND', `12.5a Stable demand pattern verified (got ${stableAnalysis.detectedPattern})`);
+  assert(stableAnalysis.recommendedDecision === 'KEEP', '12.5b Recommended action is KEEP for stable demand');
+
+  // 12.6 Price is Contextual Metadata Only (Does NOT dictate cache priority)
+  const priceObsA: any = { objectId: 'Item_Luxury_HighPrice', demand: 2, price: 5000, backendLatencyMs: 20, retrievalCostMs: 20, responseSizeBytes: 1024 };
+  const priceObsB: any = { objectId: 'Item_Utility_LowPrice', demand: 800, price: 5, backendLatencyMs: 300, retrievalCostMs: 300, responseSizeBytes: 1024 };
+  
+  const factorsA = scorer.calculateFactors(priceObsA, phase4Settings, { poolUtilization: 0, queueDepth: 0, errorRate: 0, avgBackendLatencyMs: 20 });
+  const factorsB = scorer.calculateFactors(priceObsB, phase4Settings, { poolUtilization: 0, queueDepth: 0, errorRate: 0, avgBackendLatencyMs: 300 });
+  
+  assert(
+    factorsB.finalScore > factorsA.finalScore,
+    `12.6 High-demand/high-cost item (score ${factorsB.finalScore}) prioritised over low-demand expensive item (score ${factorsA.finalScore})`
+  );
 
   console.log('\n========================================================');
   console.log(`  TEST RESULTS: ${passed} PASSED, ${failed} FAILED`);

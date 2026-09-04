@@ -14,9 +14,13 @@ class AdaptiveScorer {
         const now = Date.now();
         const objectId = metadata.objectId || metadata.key || 'unknown';
         // 1. Prediction & Trend
-        const pred = predictor_1.predictor.predictDemand(objectId, now);
-        const predictedDemand = pred.predictedDemandChange;
-        const confidence = pred.confidence;
+        let predictedDemand = metadata.predictedDemand;
+        let confidence = metadata.confidence;
+        if (predictedDemand === undefined || confidence === undefined) {
+            const pred = predictor_1.predictor.predictDemand(objectId, now);
+            predictedDemand = predictedDemand !== undefined ? predictedDemand : pred.predictedDemandChange;
+            confidence = confidence !== undefined ? confidence : pred.confidence;
+        }
         // 2. Normalized Frequency Factor [0, 1]
         const accessCount = metadata.accessCount || 1;
         // Logarithmic dampening of frequency so high volume doesn't saturate completely
