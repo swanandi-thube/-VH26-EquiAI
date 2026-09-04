@@ -1,25 +1,32 @@
 /**
  * Real Request Pipeline for ADAPTIVECACHE
- * Client -> Rate Limiter -> Redis -> Singleflight Coalescer -> Circuit Breaker -> Database -> Scorer & Dynamic TTL -> Cache SET -> Telemetry
+ * Ingress -> Rate Limiter -> Redis -> Singleflight Coalescer -> Circuit Breaker -> Database -> Scorer & Dynamic TTL -> Cache SET -> Telemetry
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import { db, ProductRecord } from '../db';
 import { redisCache } from '../cache/redis';
 import { rateLimiter } from '../protection/rateLimiter';
 import { circuitBreaker } from '../protection/circuitBreaker';
 import { coalescer } from '../protection/coalescing';
 import { poolMonitor } from '../protection/connectionPool';
+import { dbClient } from '../database/client';
 import { scorer } from '../engine/scorer';
 import { lifecycle } from '../engine/lifecycle';
 import { predictor } from '../engine/predictor';
+import {
+  cacheObjectRepository,
+  requestLogRepository,
+  decisionRepository,
+  eventRepository,
+  settingsRepository,
+} from '../repositories';
 import { RequestLog, CacheObjectMetadata } from '../types';
 
 export interface PipelineResult {
   requestId: string;
   objectId: string;
   statusCode: number;
-  data: ProductRecord | null;
+  data: any | null;
   cacheHit: boolean;
   wasCoalesced: boolean;
   backendLatencyMs: number;
@@ -31,18 +38,18 @@ export interface PipelineResult {
 
 export class RequestPipeline {
   /**
-   * Main pipeline request processor
+   * Main pipeline request processor supporting generic objectId
    */
-  public async processProductRequest(
+  public async processRequest(
     objectId: string,
     simulatedLatencyMs?: number,
     simulatedErrorRate?: number
   ): Promise<PipelineResult> {
     const startTime = Date.now();
     const requestId = `REQ-${uuidv4().substring(0, 8)}`;
-    const cacheKey = `product:${objectId}`;
+    const cacheKey = `cache:obj:${objectId}`;
 
-    // 1. Rate Limiter Check
+    // 1. Rate Limiter Token Bucket Check
     if (!rateLimiter.tryAcquire(1)) {
       const totalLatency = Date.now() - startTime;
       const log: RequestLog = {
@@ -57,8 +64,8 @@ export class RequestPipeline {
         statusCode: 429,
         errorMessage: 'Rate limit exceeded (Token Bucket Throttling)',
       };
-      db.logRequest(log);
-      db.logEvent({
+      await requestLogRepository.log(log);
+      await eventRepository.log({
         id: `EVT-${uuidv4().substring(0, 8)}`,
         timestamp: startTime,
         eventType: 'RATE-LIMIT',
@@ -78,27 +85,27 @@ export class RequestPipeline {
       };
     }
 
-    // 2. Record Access in Predictor
+    // 2. Record Access in Demand Velocity Predictor
     predictor.recordAccess(objectId, startTime);
 
-    // 3. Redis Cache Check
+    // 3. Redis Cache Lookup (Live Cache)
     const cacheResult = await redisCache.get(cacheKey);
 
     if (cacheResult.hit && cacheResult.value) {
       // --- CACHE HIT ---
-      let parsedData: ProductRecord | null = null;
+      let parsedData: any = null;
       try {
         parsedData = JSON.parse(cacheResult.value);
       } catch {
-        parsedData = null;
+        parsedData = cacheResult.value;
       }
 
       const totalLatency = Math.max(1, Date.now() - startTime);
 
-      // Evaluate lifecycle for active item (e.g. background REFRESH if TTL is running out)
+      // Re-evaluate lifecycle for active item (e.g. background REFRESH if TTL is expiring)
       const currentMeta = cacheResult.metadata!;
-      const settings = db.getSettings();
-      const pool = db.getPoolMetrics();
+      const settings = await settingsRepository.getSettings();
+      const pool = dbClient.getMetrics();
       const factors = scorer.calculateFactors(currentMeta, settings, {
         poolUtilization: pool.utilization,
         queueDepth: pool.connectionQueueDepth,
@@ -115,7 +122,7 @@ export class RequestPipeline {
         lastDecisionTime: Date.now(),
       });
 
-      // If decision is REFRESH, trigger async background fetch to refresh before expiration
+      // If decision is REFRESH, trigger async background refresh before expiration
       if (evalResult.decision === 'REFRESH') {
         redisCache.incrementRefresh();
         this.triggerBackgroundRefresh(objectId, cacheKey);
@@ -133,7 +140,7 @@ export class RequestPipeline {
         statusCode: 200,
         wasCoalesced: false,
       };
-      db.logRequest(log);
+      await requestLogRepository.log(log);
 
       return {
         requestId,
@@ -165,8 +172,8 @@ export class RequestPipeline {
         statusCode: 503,
         errorMessage: 'Circuit Breaker is OPEN. Backend protection active.',
       };
-      db.logRequest(log);
-      db.logEvent({
+      await requestLogRepository.log(log);
+      await eventRepository.log({
         id: `EVT-${uuidv4().substring(0, 8)}`,
         timestamp: startTime,
         eventType: 'CIRCUIT-BREAKER',
@@ -188,15 +195,47 @@ export class RequestPipeline {
 
     // 5. Request Coalescing (Singleflight) for concurrent misses
     const { result: backendResponse, wasCoalesced } = await coalescer.execute(cacheKey, async () => {
-      return await db.getProductById(objectId, simulatedLatencyMs, simulatedErrorRate);
+      const fetchStart = Date.now();
+      
+      // Simulated error rate check
+      const errRate = simulatedErrorRate !== undefined ? simulatedErrorRate : 0;
+      if (errRate > 0 && ((Date.now() + objectId.length) % 100) < (errRate * 100)) {
+        const delay = simulatedLatencyMs || 250;
+        await new Promise(r => setTimeout(r, delay));
+        return {
+          entity: null,
+          latencyMs: Date.now() - fetchStart,
+          statusCode: 503,
+        };
+      }
+
+      const entity = await cacheObjectRepository.findById(objectId);
+
+      // Determine realistic query delay
+      let delayMs = 0;
+      if (simulatedLatencyMs !== undefined && simulatedLatencyMs > 0) {
+        delayMs = simulatedLatencyMs;
+      } else if (entity) {
+        delayMs = entity.baseRetrievalCostMs;
+      } else {
+        delayMs = 25; // lookup time for missing item
+      }
+
+      await new Promise(r => setTimeout(r, delayMs));
+
+      return {
+        entity,
+        latencyMs: Date.now() - fetchStart,
+        statusCode: entity ? 200 : 404,
+      };
     });
 
-    const isSuccess = backendResponse.statusCode === 200 && backendResponse.product !== null;
+    const isSuccess = backendResponse.statusCode === 200 && backendResponse.entity !== null;
     circuitBreaker.recordResult(isSuccess);
 
     const totalLatency = Date.now() - startTime;
 
-    if (!isSuccess || !backendResponse.product) {
+    if (!isSuccess || !backendResponse.entity) {
       const log: RequestLog = {
         requestId,
         timestamp: startTime,
@@ -210,8 +249,8 @@ export class RequestPipeline {
         errorMessage: backendResponse.statusCode === 404 ? 'Object not found' : 'Backend execution error',
         wasCoalesced,
       };
-      db.logRequest(log);
-      db.logEvent({
+      await requestLogRepository.log(log);
+      await eventRepository.log({
         id: `EVT-${uuidv4().substring(0, 8)}`,
         timestamp: startTime,
         eventType: 'BACKEND-ERROR',
@@ -232,16 +271,16 @@ export class RequestPipeline {
     }
 
     // 6. Decision Engine & Multi-factor Scoring for new object
-    const product = backendResponse.product;
-    const settings = db.getSettings();
-    const pool = db.getPoolMetrics();
+    const entity = backendResponse.entity;
+    const settings = await settingsRepository.getSettings();
+    const pool = dbClient.getMetrics();
     poolMonitor.updateReplicaLoad(pool.activeConnections, 1.0);
 
     const candidateMeta: Partial<CacheObjectMetadata> = {
       objectId,
       key: cacheKey,
-      sizeBytes: product.sizeBytes,
-      retrievalCostMs: product.baseRetrievalCostMs,
+      sizeBytes: entity.sizeBytes,
+      retrievalCostMs: entity.baseRetrievalCostMs,
       backendLatencyMs: backendResponse.latencyMs,
       accessCount: 1,
       lastAccessed: Date.now(),
@@ -255,16 +294,16 @@ export class RequestPipeline {
     });
 
     const evalResult = lifecycle.evaluate(candidateMeta as any, factors, settings, false);
-    db.logDecision(evalResult.decisionRecord);
+    await decisionRepository.log(evalResult.decisionRecord);
 
-    // 7. Store in Redis with dynamic TTL & metadata
+    // 7. Store in Redis Live Cache with dynamic TTL & metadata
     await redisCache.set(
       cacheKey,
-      JSON.stringify(product),
+      JSON.stringify(entity.payload || entity),
       {
         objectId,
-        sizeBytes: product.sizeBytes,
-        retrievalCostMs: product.baseRetrievalCostMs,
+        sizeBytes: entity.sizeBytes,
+        retrievalCostMs: entity.baseRetrievalCostMs,
         backendLatencyMs: backendResponse.latencyMs,
         ttlSeconds: evalResult.newTtlSeconds,
         predictedDemand: factors.predictedDemand,
@@ -278,7 +317,7 @@ export class RequestPipeline {
 
     if (evalResult.decision === 'PRE-CACHE') {
       redisCache.incrementPreCache();
-      db.logEvent({
+      await eventRepository.log({
         id: `EVT-${uuidv4().substring(0, 8)}`,
         timestamp: Date.now(),
         eventType: 'PRE-CACHE',
@@ -293,20 +332,20 @@ export class RequestPipeline {
       timestamp: startTime,
       objectId,
       operation: 'GET',
-      responseSizeBytes: product.sizeBytes,
+      responseSizeBytes: entity.sizeBytes,
       cacheHit: false,
       backendLatencyMs: backendResponse.latencyMs,
       totalLatencyMs: totalLatency,
       statusCode: 200,
       wasCoalesced,
     };
-    db.logRequest(log);
+    await requestLogRepository.log(log);
 
     return {
       requestId,
       objectId,
       statusCode: 200,
-      data: product,
+      data: entity.payload || entity,
       cacheHit: false,
       wasCoalesced,
       backendLatencyMs: backendResponse.latencyMs,
@@ -317,20 +356,31 @@ export class RequestPipeline {
   }
 
   /**
+   * Compatibility alias for processRequest
+   */
+  public async processProductRequest(
+    objectId: string,
+    simulatedLatencyMs?: number,
+    simulatedErrorRate?: number
+  ): Promise<PipelineResult> {
+    return this.processRequest(objectId, simulatedLatencyMs, simulatedErrorRate);
+  }
+
+  /**
    * Asynchronous background refresh for high-value items approaching expiration
    */
   private async triggerBackgroundRefresh(objectId: string, cacheKey: string) {
     try {
-      const res = await db.getProductById(objectId);
-      if (res.product) {
-        const settings = db.getSettings();
-        const pool = db.getPoolMetrics();
+      const entity = await cacheObjectRepository.findById(objectId);
+      if (entity) {
+        const settings = await settingsRepository.getSettings();
+        const pool = dbClient.getMetrics();
         const factors = scorer.calculateFactors(
           {
             objectId,
-            sizeBytes: res.product.sizeBytes,
-            retrievalCostMs: res.product.baseRetrievalCostMs,
-            backendLatencyMs: res.latencyMs,
+            sizeBytes: entity.sizeBytes,
+            retrievalCostMs: entity.baseRetrievalCostMs,
+            backendLatencyMs: 50,
             accessCount: 10,
           },
           settings,
@@ -338,18 +388,18 @@ export class RequestPipeline {
             poolUtilization: pool.utilization,
             queueDepth: pool.connectionQueueDepth,
             errorRate: 0,
-            avgBackendLatencyMs: res.latencyMs,
+            avgBackendLatencyMs: 50,
           }
         );
         const evalRes = lifecycle.evaluate({ objectId } as any, factors, settings, true);
         await redisCache.set(
           cacheKey,
-          JSON.stringify(res.product),
+          JSON.stringify(entity.payload || entity),
           {
             objectId,
-            sizeBytes: res.product.sizeBytes,
-            retrievalCostMs: res.product.baseRetrievalCostMs,
-            backendLatencyMs: res.latencyMs,
+            sizeBytes: entity.sizeBytes,
+            retrievalCostMs: entity.baseRetrievalCostMs,
+            backendLatencyMs: 50,
             ttlSeconds: evalRes.newTtlSeconds,
             predictedDemand: factors.predictedDemand,
             confidence: factors.confidence,
@@ -358,7 +408,7 @@ export class RequestPipeline {
           },
           evalRes.newTtlSeconds
         );
-        db.logEvent({
+        await eventRepository.log({
           id: `EVT-${uuidv4().substring(0, 8)}`,
           timestamp: Date.now(),
           eventType: 'REFRESH',

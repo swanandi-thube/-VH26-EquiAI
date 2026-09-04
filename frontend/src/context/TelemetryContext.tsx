@@ -101,9 +101,10 @@ export const TelemetryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     let reconnectTimeout: NodeJS.Timeout;
 
     const connectWs = () => {
+      const envWsUrl = (import.meta as any).env?.VITE_WS_URL;
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const host = window.location.host;
-      const wsUrl = `${protocol}//${host}/ws`;
+      const wsUrl = envWsUrl || `${protocol}//${host}/ws`;
 
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;

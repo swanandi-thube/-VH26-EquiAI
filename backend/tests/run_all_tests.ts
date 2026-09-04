@@ -33,12 +33,12 @@ async function runTests() {
 
   // Test 1: Redis Cache Engine Operations (GET, SET, TTL, Eviction)
   console.log('--- Test Suite 1: Real Redis Cache Engine ---');
-  redisCache.flushall();
+  await redisCache.flushall();
   redisCache.setCapacity(10000); // 10 KB small capacity
   await redisCache.set('product:1', JSON.stringify({ name: 'Test 1' }), { objectId: '1', sizeBytes: 4000, retrievalCostMs: 50 }, 10);
   const get1 = await redisCache.get('product:1');
   assert(get1.hit === true, 'Cache SET and GET hit verified');
-  assert(redisCache.ttl('product:1') > 0, 'TTL correctly returned for active key');
+  assert((await redisCache.ttl('product:1')) > 0, 'TTL correctly returned for active key');
 
   // Insert two more items to force eviction of 10KB budget
   await redisCache.set('product:2', JSON.stringify({ name: 'Test 2' }), { objectId: '2', sizeBytes: 4000, retrievalCostMs: 100 }, 10);
@@ -157,6 +157,8 @@ async function runTests() {
 
   if (failed > 0) {
     process.exit(1);
+  } else {
+    process.exit(0);
   }
 }
 

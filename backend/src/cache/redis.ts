@@ -1,17 +1,21 @@
 /**
  * Real Redis Cache Engine & Client for ADAPTIVECACHE
- * Supports both standalone Redis connection (via ioredis) and full-fidelity
- * in-memory Redis command implementation with exact TTL timers, size tracking,
- * key metadata, and eviction telemetry.
+ * Connects to live Redis via REDIS_URL using ioredis.
+ * Implements GET, SET, SETEX, DEL, EXPIRE, TTL, DBSIZE, FLUSHALL with
+ * separate tracking of adaptive_cache_evictions and redis_native_evictions.
  */
 
 import Redis from 'ioredis';
+import { config } from '../config';
 import { CacheObjectMetadata, DecisionType } from '../types';
 
 export interface CacheStats {
   hits: number;
   misses: number;
   evictions: number;
+  adaptiveEvictions: number;
+  redisNativeEvictions: number;
+  totalEvictions: number;
   refreshes: number;
   preCaches: number;
   totalKeys: number;
@@ -20,25 +24,26 @@ export interface CacheStats {
   hitRate: number;
 }
 
-interface RedisEntry {
+interface RedisMemoryEntry {
   value: string;
   metadata: CacheObjectMetadata;
-  expiresAt: number | null; // null for no TTL
+  expiresAt: number | null;
 }
 
 export class RedisCacheService {
   private redisClient: Redis | null = null;
-  public isRedisServerConnected: boolean = false;
+  public isConnected: boolean = false;
 
-  // In-memory Redis Store
-  private store: Map<string, RedisEntry> = new Map();
-  private maxMemoryBytes: number = 64 * 1024 * 1024; // 64 MB default
+  // In-memory Redis Store (Fallback / local mirror)
+  private fallbackStore: Map<string, RedisMemoryEntry> = new Map();
+  private maxMemoryBytes: number = config.maxCacheCapacityBytes;
   private usedMemoryBytes: number = 0;
 
-  // Performance telemetry counters
+  // Performance and eviction counters
   private hits: number = 0;
   private misses: number = 0;
-  private evictions: number = 0;
+  private adaptiveEvictions: number = 0;
+  private redisNativeEvictions: number = 0;
   private refreshes: number = 0;
   private preCaches: number = 0;
 
@@ -48,24 +53,33 @@ export class RedisCacheService {
   }
 
   private async initRedis() {
-    const redisUrl = process.env.REDIS_URL;
-    if (redisUrl) {
+    if (config.redisUrl) {
       try {
-        this.redisClient = new Redis(redisUrl, {
-          connectTimeout: 2000,
-          maxRetriesPerRequest: 1,
+        this.redisClient = new Redis(config.redisUrl, {
+          connectTimeout: 3000,
+          maxRetriesPerRequest: 2,
           lazyConnect: true,
+          retryStrategy: (times) => Math.min(times * 100, 3000),
+        });
+
+        this.redisClient.on('connect', () => {
+          this.isConnected = true;
+          console.log('[Redis] Connected to live Redis instance via REDIS_URL.');
+        });
+
+        this.redisClient.on('error', (err) => {
+          this.isConnected = false;
+          console.warn('[Redis Error]:', err.message);
         });
 
         await this.redisClient.connect();
-        this.isRedisServerConnected = true;
-        console.log('[Redis] Connected to standalone Redis instance.');
+        this.isConnected = true;
       } catch (err: any) {
-        console.warn(`[Redis] Redis server connection failed (${err.message}). Using integrated high-speed Redis Cache Engine.`);
-        this.isRedisServerConnected = false;
+        this.isConnected = false;
+        console.warn(`[Redis] Live connection failed (${err.message}). Using integrated high-speed Redis Cache Engine.`);
       }
     } else {
-      console.log('[Redis] Operating in high-speed zero-dependency Redis Cache Engine.');
+      console.log('[Redis] No REDIS_URL provided. Operating in high-speed integrated Redis Cache Engine.');
     }
   }
 
@@ -78,14 +92,29 @@ export class RedisCacheService {
   }
 
   /**
-   * Periodic TTL expiration sweep (runs every 1 second)
+   * Periodic local TTL sweep and native Redis eviction check
    */
   private startExpirationCycle() {
-    setInterval(() => {
+    setInterval(async () => {
       const now = Date.now();
-      for (const [key, entry] of this.store.entries()) {
+
+      // Sweep local fallback store
+      for (const [key, entry] of this.fallbackStore.entries()) {
         if (entry.expiresAt && entry.expiresAt <= now) {
           this.del(key);
+        }
+      }
+
+      // Query live Redis native evictions if connected
+      if (this.isConnected && this.redisClient) {
+        try {
+          const info = await this.redisClient.info('stats');
+          const match = info.match(/evicted_keys:(\d+)/);
+          if (match && match[1]) {
+            this.redisNativeEvictions = parseInt(match[1], 10);
+          }
+        } catch {
+          // ignore background stats poll error
         }
       }
     }, 1000);
@@ -96,8 +125,57 @@ export class RedisCacheService {
    */
   public async get(key: string): Promise<{ value: string | null; metadata: CacheObjectMetadata | null; hit: boolean }> {
     const now = Date.now();
-    const entry = this.store.get(key);
 
+    // 1. If connected to live Redis, query Redis directly
+    if (this.isConnected && this.redisClient) {
+      try {
+        const val = await this.redisClient.get(key);
+        if (val !== null) {
+          this.hits++;
+          // Fetch metadata from companion key
+          const metaStr = await this.redisClient.get(`${key}:meta`);
+          let meta: CacheObjectMetadata;
+          if (metaStr) {
+            meta = JSON.parse(metaStr);
+            meta.lastAccessed = now;
+            meta.accessCount++;
+            meta.recentAccessCount++;
+            const ttl = await this.redisClient.ttl(key);
+            meta.remainingTtlSeconds = Math.max(0, ttl);
+            await this.redisClient.set(`${key}:meta`, JSON.stringify(meta), 'EX', Math.max(ttl, 1));
+          } else {
+            meta = {
+              objectId: key.replace(/^cache:(obj:)?/, ''),
+              key,
+              sizeBytes: Buffer.byteLength(val, 'utf8'),
+              createdAt: now,
+              lastAccessed: now,
+              accessCount: 1,
+              recentAccessCount: 1,
+              retrievalCostMs: 50,
+              backendLatencyMs: 50,
+              ttlSeconds: 300,
+              remainingTtlSeconds: 300,
+              expiresAt: now + 300000,
+              predictedDemand: 0,
+              confidence: 0.5,
+              adaptiveScore: 0.5,
+              lastDecision: 'KEEP',
+              lastDecisionTime: now,
+            };
+          }
+          return { value: val, metadata: meta, hit: true };
+        } else {
+          this.misses++;
+          return { value: null, metadata: null, hit: false };
+        }
+      } catch (err: any) {
+        console.warn(`[Redis] Live GET error: ${err.message}. Checking fallback.`);
+      }
+    }
+
+    // 2. Fallback in-memory Redis Engine
+    const entry = this.fallbackStore.get(key);
     if (!entry) {
       this.misses++;
       return { value: null, metadata: null, hit: false };
@@ -127,38 +205,27 @@ export class RedisCacheService {
   }
 
   /**
-   * SET cache key with metadata and optional TTL
+   * SET cache key with value, metadata, and optional TTL
    */
   public async set(
     key: string,
     value: string,
-    metadataPartial: Partial<CacheObjectMetadata>,
+    metadataPartial: Partial<CacheObjectMetadata> = {},
     ttlSeconds?: number
   ): Promise<boolean> {
     const now = Date.now();
     const sizeBytes = metadataPartial.sizeBytes || Buffer.byteLength(value, 'utf8') + 256;
-    const ttl = ttlSeconds !== undefined ? ttlSeconds : (metadataPartial.ttlSeconds || 300);
+    const ttl = ttlSeconds !== undefined ? ttlSeconds : (metadataPartial.ttlSeconds || config.defaultTtlSeconds);
     const expiresAt = ttl > 0 ? now + (ttl * 1000) : null;
 
-    // Check if key already exists
-    const existing = this.store.get(key);
-    if (existing) {
-      this.usedMemoryBytes -= existing.metadata.sizeBytes;
-    }
-
-    // Enforce memory capacity if needed before inserting
-    while (this.usedMemoryBytes + sizeBytes > this.maxMemoryBytes && this.store.size > 0) {
-      this.evictOne();
-    }
-
     const fullMetadata: CacheObjectMetadata = {
-      objectId: metadataPartial.objectId || key,
+      objectId: metadataPartial.objectId || key.replace(/^cache:(obj:)?/, ''),
       key,
       sizeBytes,
-      createdAt: existing ? existing.metadata.createdAt : now,
+      createdAt: now,
       lastAccessed: now,
-      accessCount: (existing ? existing.metadata.accessCount : 0) + 1,
-      recentAccessCount: (existing ? existing.metadata.recentAccessCount : 0) + 1,
+      accessCount: (metadataPartial.accessCount || 0) + 1,
+      recentAccessCount: (metadataPartial.recentAccessCount || 0) + 1,
       retrievalCostMs: metadataPartial.retrievalCostMs || 50,
       backendLatencyMs: metadataPartial.backendLatencyMs || 50,
       ttlSeconds: ttl,
@@ -173,13 +240,38 @@ export class RedisCacheService {
       isPreCached: metadataPartial.isPreCached || false,
     };
 
-    this.store.set(key, {
+    // Live Redis write
+    if (this.isConnected && this.redisClient) {
+      try {
+        if (ttl > 0) {
+          await this.redisClient.set(key, value, 'EX', ttl);
+          await this.redisClient.set(`${key}:meta`, JSON.stringify(fullMetadata), 'EX', ttl);
+        } else {
+          await this.redisClient.set(key, value);
+          await this.redisClient.set(`${key}:meta`, JSON.stringify(fullMetadata));
+        }
+      } catch (err: any) {
+        console.warn(`[Redis] Live SET error: ${err.message}`);
+      }
+    }
+
+    // Mirror to fallback store & enforce adaptive capacity
+    const existing = this.fallbackStore.get(key);
+    if (existing) {
+      this.usedMemoryBytes -= existing.metadata.sizeBytes;
+    }
+
+    while (this.usedMemoryBytes + sizeBytes > this.maxMemoryBytes && this.fallbackStore.size > 0) {
+      this.evictOne();
+    }
+
+    this.fallbackStore.set(key, {
       value,
       metadata: fullMetadata,
       expiresAt,
     });
-
     this.usedMemoryBytes += sizeBytes;
+
     return true;
   }
 
@@ -198,11 +290,20 @@ export class RedisCacheService {
   /**
    * DEL cache key
    */
-  public del(key: string): boolean {
-    const entry = this.store.get(key);
+  public async del(key: string): Promise<boolean> {
+    if (this.isConnected && this.redisClient) {
+      try {
+        await this.redisClient.del(key);
+        await this.redisClient.del(`${key}:meta`);
+      } catch (err: any) {
+        console.warn(`[Redis] Live DEL error: ${err.message}`);
+      }
+    }
+
+    const entry = this.fallbackStore.get(key);
     if (entry) {
       this.usedMemoryBytes = Math.max(0, this.usedMemoryBytes - entry.metadata.sizeBytes);
-      this.store.delete(key);
+      this.fallbackStore.delete(key);
       return true;
     }
     return false;
@@ -211,8 +312,17 @@ export class RedisCacheService {
   /**
    * EXPIRE key with new TTL
    */
-  public expire(key: string, ttlSeconds: number): boolean {
-    const entry = this.store.get(key);
+  public async expire(key: string, ttlSeconds: number): Promise<boolean> {
+    if (this.isConnected && this.redisClient) {
+      try {
+        await this.redisClient.expire(key, ttlSeconds);
+        await this.redisClient.expire(`${key}:meta`, ttlSeconds);
+      } catch (err: any) {
+        console.warn(`[Redis] Live EXPIRE error: ${err.message}`);
+      }
+    }
+
+    const entry = this.fallbackStore.get(key);
     if (entry) {
       const now = Date.now();
       entry.expiresAt = now + (ttlSeconds * 1000);
@@ -227,30 +337,37 @@ export class RedisCacheService {
   /**
    * TTL of key in seconds (-1 if no expire, -2 if not found)
    */
-  public ttl(key: string): number {
-    const entry = this.store.get(key);
+  public async ttl(key: string): Promise<number> {
+    if (this.isConnected && this.redisClient) {
+      try {
+        return await this.redisClient.ttl(key);
+      } catch {
+        // Fallback
+      }
+    }
+
+    const entry = this.fallbackStore.get(key);
     if (!entry) return -2;
     if (!entry.expiresAt) return -1;
     return Math.max(0, Math.round((entry.expiresAt - Date.now()) / 1000));
   }
 
   /**
-   * Evicts the lowest-scoring / least valuable item based on adaptive score or LRU fallback
+   * Evicts the lowest-scoring item based on adaptive score or LRU fallback
    */
   public evictOne(): string | null {
-    if (this.store.size === 0) return null;
+    if (this.fallbackStore.size === 0) return null;
 
     let candidateKey: string | null = null;
     let lowestScore = Number.MAX_VALUE;
 
-    // Find key with lowest adaptive score (or oldest access if score tied)
-    for (const [key, entry] of this.store.entries()) {
+    for (const [key, entry] of this.fallbackStore.entries()) {
       const score = entry.metadata.adaptiveScore !== undefined ? entry.metadata.adaptiveScore : 0.5;
       if (score < lowestScore) {
         lowestScore = score;
         candidateKey = key;
       } else if (score === lowestScore && candidateKey) {
-        const currentCandidate = this.store.get(candidateKey);
+        const currentCandidate = this.fallbackStore.get(candidateKey);
         if (currentCandidate && entry.metadata.lastAccessed < currentCandidate.metadata.lastAccessed) {
           candidateKey = key;
         }
@@ -259,7 +376,7 @@ export class RedisCacheService {
 
     if (candidateKey) {
       this.del(candidateKey);
-      this.evictions++;
+      this.adaptiveEvictions++;
       return candidateKey;
     }
 
@@ -267,87 +384,89 @@ export class RedisCacheService {
   }
 
   /**
-   * Updates metadata on an existing key (e.g. new score, decision, pre-cached flag)
+   * Update metadata on an active key
    */
   public updateMetadata(key: string, patch: Partial<CacheObjectMetadata>): boolean {
-    const entry = this.store.get(key);
-    if (!entry) return false;
-    entry.metadata = {
-      ...entry.metadata,
-      ...patch,
-    };
-    return true;
+    const entry = this.fallbackStore.get(key);
+    if (entry) {
+      entry.metadata = {
+        ...entry.metadata,
+        ...patch,
+      };
+      if (this.isConnected && this.redisClient) {
+        this.redisClient.set(`${key}:meta`, JSON.stringify(entry.metadata)).catch(() => {});
+      }
+      return true;
+    }
+    return false;
   }
 
-  /**
-   * Record pre-cache action counter
-   */
-  public incrementPreCache() {
+  public incrementPreCache(): void {
     this.preCaches++;
   }
 
-  /**
-   * Record refresh action counter
-   */
-  public incrementRefresh() {
+  public incrementRefresh(): void {
     this.refreshes++;
   }
 
-  /**
-   * Get all active cache objects with full metadata
-   */
   public getAllObjects(): CacheObjectMetadata[] {
     const now = Date.now();
     const list: CacheObjectMetadata[] = [];
-    for (const entry of this.store.values()) {
+    for (const entry of this.fallbackStore.values()) {
       if (entry.expiresAt) {
         entry.metadata.remainingTtlSeconds = Math.max(0, Math.round((entry.expiresAt - now) / 1000));
       }
       list.push({ ...entry.metadata });
     }
-    // Return sorted by most recently accessed
     return list.sort((a, b) => b.lastAccessed - a.lastAccessed);
   }
 
-  /**
-   * Get total keys count
-   */
-  public dbsize(): number {
-    return this.store.size;
+  public async dbsize(): Promise<number> {
+    if (this.isConnected && this.redisClient) {
+      try {
+        return await this.redisClient.dbsize();
+      } catch {
+        // Fallback
+      }
+    }
+    return this.fallbackStore.size;
   }
 
-  /**
-   * Flush all cache keys
-   */
-  public flushall(): void {
-    this.store.clear();
+  public async flushall(): Promise<void> {
+    if (this.isConnected && this.redisClient) {
+      try {
+        await this.redisClient.flushall();
+      } catch (err: any) {
+        console.warn(`[Redis] Live FLUSHALL error: ${err.message}`);
+      }
+    }
+    this.fallbackStore.clear();
     this.usedMemoryBytes = 0;
   }
 
-  /**
-   * Reset telemetry counters
-   */
   public resetCounters(): void {
     this.hits = 0;
     this.misses = 0;
-    this.evictions = 0;
+    this.adaptiveEvictions = 0;
+    this.redisNativeEvictions = 0;
     this.refreshes = 0;
     this.preCaches = 0;
   }
 
-  /**
-   * Get full cache stats
-   */
   public getStats(): CacheStats {
     const totalRequests = this.hits + this.misses;
     const hitRate = totalRequests > 0 ? this.hits / totalRequests : 0;
+    const totalEvictions = this.adaptiveEvictions + this.redisNativeEvictions;
     return {
       hits: this.hits,
       misses: this.misses,
-      evictions: this.evictions,
+      evictions: totalEvictions,
+      adaptiveEvictions: this.adaptiveEvictions,
+      redisNativeEvictions: this.redisNativeEvictions,
+      totalEvictions,
       refreshes: this.refreshes,
       preCaches: this.preCaches,
-      totalKeys: this.store.size,
+      totalKeys: this.fallbackStore.size,
       usedMemoryBytes: this.usedMemoryBytes,
       maxMemoryBytes: this.maxMemoryBytes,
       hitRate,
@@ -355,24 +474,34 @@ export class RedisCacheService {
   }
 
   /**
-   * Health check
+   * Real health verification via PING
    */
   public async checkHealth(): Promise<{ status: 'CONNECTED' | 'DEGRADED' | 'OFFLINE'; latencyMs: number; message: string }> {
     const start = Date.now();
-    if (this.isRedisServerConnected && this.redisClient) {
+    if (this.redisClient) {
       try {
         await this.redisClient.ping();
         const latency = Date.now() - start;
-        return { status: 'CONNECTED', latencyMs: latency, message: 'Redis standalone cluster healthy' };
+        this.isConnected = true;
+        return {
+          status: 'CONNECTED',
+          latencyMs: latency,
+          message: 'Redis live instance connected and responding',
+        };
       } catch (err: any) {
-        return { status: 'DEGRADED', latencyMs: Date.now() - start, message: `Redis standalone issue: ${err.message}` };
+        this.isConnected = false;
+        return {
+          status: 'DEGRADED',
+          latencyMs: Date.now() - start,
+          message: `Redis live ping failed: ${err.message}`,
+        };
       }
     }
-    const latency = Date.now() - start;
+
     return {
-      status: 'CONNECTED',
-      latencyMs: latency,
-      message: `Redis Cache Engine active (${this.store.size} keys, ${(this.usedMemoryBytes / 1024).toFixed(1)} KB used)`,
+      status: 'OFFLINE',
+      latencyMs: 0,
+      message: 'REDIS_URL not configured. Operating in high-speed integrated Redis Cache Engine.',
     };
   }
 }
