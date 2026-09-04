@@ -174,13 +174,14 @@ export const apiClient = {
     await fetch(`${API_BASE}/protection/reset`, { method: 'POST' });
   },
 
-  async runBenchmark(params: { requestCount?: number; objectCount?: number; capacityMb?: number; traceName?: string }): Promise<BenchmarkRun> {
+  async runBenchmark(params: { workloadId?: string; requestCount?: number; objectCount?: number; capacityMb?: number; traceName?: string }): Promise<BenchmarkRun> {
     const res = await fetch(`${API_BASE}/benchmark/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
     });
     const json = await res.json();
+    if (!json.success) throw new Error(json.message || 'Benchmark run failed');
     return json.data;
   },
 

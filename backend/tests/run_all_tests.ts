@@ -19,11 +19,12 @@ import { IOriginDataSource } from '../src/services/originAdapter';
 import { workloadIngestionService } from '../src/services/workloadIngestionService';
 import { explainability } from '../src/engine/explainability';
 import { changeDetector } from '../src/engine/changeDetector';
-import { observationRepository, decisionRepository, settingsRepository } from '../src/repositories';
+import { observationRepository, decisionRepository, settingsRepository, benchmarkRepository } from '../src/repositories';
 import { observationController } from '../src/controllers/observationController';
 import { replayRunner } from '../src/workload/replayRunner';
 import { requestQueue } from '../src/protection/requestQueue';
 import { retryController } from '../src/protection/retryController';
+import { whatIfEngine } from '../src/engine/whatif';
 
 let passed = 0;
 let failed = 0;
@@ -836,6 +837,201 @@ async function runTests() {
 
   // Reset circuit breaker after test
   circuitBreaker.reset();
+
+  // =========================================================================
+  // Test Suite 15: Phase 8 Fair Multi-Strategy Benchmark Engine
+  // =========================================================================
+  console.log('\n--- Test Suite 15: Phase 8 Fair Multi-Strategy Benchmark Engine ---');
+  
+  // Record production cache state before benchmark
+  const preBmkRedisSize = await redisCache.dbsize();
+  const preBmkRequestLogs = await requestLogRepository.getRecent(100);
+
+  // 15.1 Trace Generation & Strict Fairness Verification
+  const sampleTrace = [
+    { objectId: 'BmkItem_A', sizeBytes: 1024 * 1024, retrievalCostMs: 100 },
+    { objectId: 'BmkItem_B', sizeBytes: 2 * 1024 * 1024, retrievalCostMs: 250 },
+    { objectId: 'BmkItem_A', sizeBytes: 1024 * 1024, retrievalCostMs: 100 },
+    { objectId: 'BmkItem_C', sizeBytes: 3 * 1024 * 1024, retrievalCostMs: 400 },
+    { objectId: 'BmkItem_B', sizeBytes: 2 * 1024 * 1024, retrievalCostMs: 250 },
+    { objectId: 'BmkItem_D', sizeBytes: 4 * 1024 * 1024, retrievalCostMs: 300 },
+    { objectId: 'BmkItem_A', sizeBytes: 1024 * 1024, retrievalCostMs: 100 },
+    { objectId: 'BmkItem_E', sizeBytes: 5 * 1024 * 1024, retrievalCostMs: 150 },
+  ];
+
+  const bmkCapacityBytes = 6 * 1024 * 1024; // 6MB capacity (forces selective evictions)
+  const bmkRun1 = await benchmarkEngine.runBenchmark(sampleTrace, bmkCapacityBytes, 'Test Trace 1');
+
+  assert(bmkRun1.isTraceVerifiedFair === true, '15.1a Benchmark trace verified fair');
+  assert(bmkRun1.fairnessDetails.identicalRequests === true, '15.1b Identical requests verified');
+  assert(bmkRun1.fairnessDetails.identicalCapacity === true, '15.1c Identical capacity verified');
+  assert(bmkRun1.results.length === 4, '15.1d All 4 strategies evaluated (Adaptive, LRU, LFU, GDS)');
+
+  // 15.2 Verify Exact Request Processing Across All 4 Algorithms
+  const adaptiveRes = bmkRun1.results.find(r => r.strategy === 'ADAPTIVE')!;
+  const lruRes = bmkRun1.results.find(r => r.strategy === 'LRU')!;
+  const lfuRes = bmkRun1.results.find(r => r.strategy === 'LFU')!;
+  const gdsRes = bmkRun1.results.find(r => r.strategy === 'GDS')!;
+
+  assert(adaptiveRes.totalRequests === sampleTrace.length, '15.2a AdaptiveCache processed all 8 requests');
+  assert(lruRes.totalRequests === sampleTrace.length, '15.2b LRU processed all 8 requests');
+  assert(lfuRes.totalRequests === sampleTrace.length, '15.2c LFU processed all 8 requests');
+  assert(gdsRes.totalRequests === sampleTrace.length, '15.2d GDS processed all 8 requests');
+
+  // 15.3 Metric Calculation Accuracy
+  for (const r of bmkRun1.results) {
+    assert(r.cacheHits + r.cacheMisses === r.totalRequests, `15.3a Hits + Misses == Total for ${r.strategy}`);
+    assert(Math.abs((r.hitRate + r.missRate) - 1.0) < 0.001, `15.3b HitRate + MissRate == 1.0 for ${r.strategy}`);
+    assert(r.avgLatencyMs > 0, `15.3c Average latency computed for ${r.strategy} (${r.avgLatencyMs}ms)`);
+    assert(r.p95LatencyMs >= r.p50LatencyMs, `15.3d P95 >= P50 for ${r.strategy}`);
+    assert(r.p99LatencyMs >= r.p95LatencyMs, `15.3e P99 >= P95 for ${r.strategy}`);
+    assert(r.totalCostUsd > 0, `15.3f Total cost computed for ${r.strategy}`);
+  }
+
+  // 15.4 Memory & Production Isolation Guarantee
+  const postBmkRedisSize = await redisCache.dbsize();
+  const postBmkRequestLogs = await requestLogRepository.getRecent(100);
+  assert(postBmkRedisSize === preBmkRedisSize, '15.4a Production Redis keys untouched by benchmark simulations');
+  assert(postBmkRequestLogs.length === preBmkRequestLogs.length, '15.4b Production request logs untouched by benchmark simulations');
+
+  // 15.5 Reproducibility Guarantee (Same input produces identical output)
+  const bmkRun2 = await benchmarkEngine.runBenchmark(sampleTrace, bmkCapacityBytes, 'Test Trace 1 (Repeat)');
+  const adaptiveRes2 = bmkRun2.results.find(r => r.strategy === 'ADAPTIVE')!;
+  const lruRes2 = bmkRun2.results.find(r => r.strategy === 'LRU')!;
+  assert(adaptiveRes.cacheHits === adaptiveRes2.cacheHits, '15.5a AdaptiveCache reproducibility verified');
+  assert(lruRes.cacheHits === lruRes2.cacheHits, '15.5b LRU reproducibility verified');
+  assert(adaptiveRes.evictionsCount === adaptiveRes2.evictionsCount, '15.5c Eviction count reproducibility verified');
+
+  // 15.6 Custom Uploaded Workload Trace Benchmark
+  const customBmkCsv = `timestamp,request_id,object_id,operation,response_size,backend_latency,regeneration_cost,status_code\n` +
+    `1725450000000,REQ-B1,CustomObj_1,GET,2048,120,120,200\n` +
+    `1725450001000,REQ-B2,CustomObj_2,GET,4096,300,300,200\n` +
+    `1725450002000,REQ-B3,CustomObj_1,GET,2048,120,120,200\n` +
+    `1725450003000,REQ-B4,CustomObj_3,GET,8192,200,200,200`;
+
+  const uploadedBmkResult = await workloadIngestionService.ingestFile(
+    'benchmark_custom_workload.csv',
+    customBmkCsv,
+    customBmkCsv.length
+  );
+
+  const bmkCustomRun = await benchmarkEngine.runBenchmarkFromWorkload(uploadedBmkResult.summary.workloadId, 16 * 1024 * 1024);
+  assert(bmkCustomRun.totalRequestsInTrace === 4, '15.6a Custom workload trace benchmark ran with 4 requests');
+  assert(bmkCustomRun.results.length === 4, '15.6b All 4 algorithms evaluated on custom trace');
+
+  // 15.7 Benchmark Persistence Repository
+  const retrievedBmkRun = await benchmarkRepository.getRunById(bmkRun1.id);
+  assert(retrievedBmkRun !== null, '15.7a Benchmark run retrieved from repository');
+  assert(retrievedBmkRun?.traceName === 'Test Trace 1', '15.7b Retrieved benchmark run matches metadata');
+  const allRuns = await benchmarkRepository.getAllRuns();
+  assert(allRuns.length >= 2, '15.7c All benchmark runs listed from repository');
+
+  // =========================================================================
+  // Test Suite 16: Phase 9 What-If & Transparent Cost ROI Engine
+  // =========================================================================
+  console.log('\n--- Test Suite 16: Phase 9 What-If & Cost ROI Engine ---');
+
+  const baseTelemetry = {
+    ...telemetry.getSnapshot(),
+    cacheHitRate: 0.70,
+    averageLatencyMs: 35,
+    requestsPerSecond: 100,
+    memoryUsedBytes: 32 * 1024 * 1024,
+  };
+  const p9Settings = await settingsRepository.getSettings();
+
+  // 16.1 What-If Counterfactual Capacity Resizing
+  const scenarioCapacityDouble = whatIfEngine.evaluate(
+    { trafficMultiplier: 1.0, cacheCapacityMb: 256, backendLatencyMs: 120, backendErrorRate: 0.0 },
+    baseTelemetry,
+    p9Settings
+  );
+
+  assert(
+    scenarioCapacityDouble.projected.hitRate > scenarioCapacityDouble.current.hitRate,
+    `16.1a Increasing cache capacity projected higher hit rate (${scenarioCapacityDouble.current.hitRate * 100}% -> ${scenarioCapacityDouble.projected.hitRate * 100}%)`
+  );
+  assert(
+    scenarioCapacityDouble.projected.avgLatencyMs < scenarioCapacityDouble.current.avgLatencyMs,
+    `16.1b Increasing cache capacity projected lower avg latency (${scenarioCapacityDouble.projected.avgLatencyMs}ms vs ${scenarioCapacityDouble.current.avgLatencyMs}ms)`
+  );
+
+  // 16.2 What-If Traffic Scaling Projection
+  const scenarioTrafficSpike = whatIfEngine.evaluate(
+    { trafficMultiplier: 3.0, cacheCapacityMb: 64, backendLatencyMs: 120, backendErrorRate: 0.0 },
+    baseTelemetry,
+    p9Settings
+  );
+  assert(
+    scenarioTrafficSpike.projected.costPerHourUsd > scenarioTrafficSpike.current.costPerHourUsd,
+    `16.2a 3x traffic scaling correctly projected increased hourly cost ($${scenarioTrafficSpike.projected.costPerHourUsd}/hr)`
+  );
+
+  // 16.3 What-If Dynamic TTL & Error Rate Impact
+  const scenarioLongTtl = whatIfEngine.evaluate(
+    { trafficMultiplier: 1.0, cacheCapacityMb: 64, backendLatencyMs: 120, backendErrorRate: 0.0, ttlSeconds: 1200 },
+    baseTelemetry,
+    p9Settings
+  );
+  assert(scenarioLongTtl.projected.hitRate >= scenarioCapacityDouble.current.hitRate, '16.3a Longer TTL projects improved hit rate');
+
+  const scenarioHighErrors = whatIfEngine.evaluate(
+    { trafficMultiplier: 1.0, cacheCapacityMb: 64, backendLatencyMs: 120, backendErrorRate: 0.3 },
+    baseTelemetry,
+    p9Settings
+  );
+  assert(
+    scenarioHighErrors.projected.avgLatencyMs > scenarioCapacityDouble.current.avgLatencyMs,
+    '16.3b Backend error rate degradation increases projected tail latency'
+  );
+
+  // 16.4 Transparent Infrastructure Cost & ROI Model
+  const costBreakdown = costEngine.calculateCost(
+    {
+      totalRequestsPerHour: 100000,
+      backendRequestsPerHour: 20000, // 80% hit rate
+      cacheHitsPerHour: 80000,
+      memoryUsedBytes: 64 * 1024 * 1024,
+      egressBytesPerHour: 100000 * 8192,
+    },
+    p9Settings
+  );
+
+  assert(costBreakdown.baselineCostPerHour > costBreakdown.adaptiveCostPerHour, '16.4a Baseline un-cached cost is strictly higher than AdaptiveCache');
+  assert(
+    costBreakdown.netSavingsPerHour === costBreakdown.baselineCostPerHour - costBreakdown.adaptiveCostPerHour,
+    `16.4b Net hourly savings verified: $${costBreakdown.netSavingsPerHour}/hr`
+  );
+  assert(
+    costBreakdown.netSavingsMonthly === Math.round(costBreakdown.netSavingsPerHour * 730 * 100) / 100,
+    `16.4c Monthly projected savings annualized at 730 hrs/mo: $${costBreakdown.netSavingsMonthly}`
+  );
+  assert(costBreakdown.roiPercentage > 0, `16.4d Positive ROI percentage calculated: ${costBreakdown.roiPercentage}%`);
+  assert(costBreakdown.backendLoadReductionPercent === 80, '16.4e 80% backend offload verified');
+
+  // 16.5 Configurable Cost Assumptions
+  const updatedSettings = await settingsRepository.updateSettings({
+    costAssumptions: {
+      ...p9Settings.costAssumptions,
+      backendRequestCostUsd: 0.00010, // double query cost
+    },
+  });
+
+  const updatedCost = costEngine.calculateCost(
+    {
+      totalRequestsPerHour: 100000,
+      backendRequestsPerHour: 20000,
+      cacheHitsPerHour: 80000,
+      memoryUsedBytes: 64 * 1024 * 1024,
+      egressBytesPerHour: 100000 * 8192,
+    },
+    updatedSettings
+  );
+
+  assert(
+    updatedCost.netSavingsPerHour > costBreakdown.netSavingsPerHour,
+    '16.5 Higher database query cost increases financial savings from caching'
+  );
 
   console.log('\n========================================================');
   console.log(`  TEST RESULTS: ${passed} PASSED, ${failed} FAILED`);

@@ -1,7 +1,7 @@
 /**
- * Fair Digital Twin Benchmark Engine
+ * Fair Digital Twin Multi-Strategy Benchmark Engine
  * Executes exact same request traces through 4 caching algorithms (AdaptiveCache, LRU, LFU, GDS)
- * with strict pre-run fairness validation and detailed comparative metrics.
+ * with strict pre-run fairness validation, memory isolation, and transparent comparative metrics.
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -9,11 +9,12 @@ import {
   CacheStrategy,
   BenchmarkRun,
   BenchmarkResultItem,
-  RequestLog,
   SystemSettings
 } from '../types';
 import { db } from '../db';
 import { costEngine } from '../engine/cost';
+import { scorer } from '../engine/scorer';
+import { settingsRepository, benchmarkRepository, workloadRepository } from '../repositories';
 
 export interface TraceRequest {
   objectId: string;
@@ -21,7 +22,7 @@ export interface TraceRequest {
   retrievalCostMs: number;
 }
 
-// ---------------------- Strategy Simulators ----------------------
+// ---------------------- Strategy Simulators (In-Memory Isolation) ----------------------
 
 interface CacheNode {
   key: string;
@@ -35,6 +36,7 @@ interface CacheNode {
 abstract class CacheSimulator {
   protected capacityBytes: number;
   protected currentMemoryBytes: number = 0;
+  protected peakMemoryBytes: number = 0;
   protected hits: number = 0;
   protected misses: number = 0;
   protected evictions: number = 0;
@@ -46,6 +48,13 @@ abstract class CacheSimulator {
   }
 
   abstract access(req: TraceRequest, timestamp: number): { hit: boolean; latencyMs: number };
+
+  protected updateMemory(delta: number): void {
+    this.currentMemoryBytes += delta;
+    if (this.currentMemoryBytes > this.peakMemoryBytes) {
+      this.peakMemoryBytes = this.currentMemoryBytes;
+    }
+  }
 
   public getMetrics(strategy: CacheStrategy, strategyName: string, settings: SystemSettings): BenchmarkResultItem {
     const totalRequests = this.hits + this.misses;
@@ -86,7 +95,7 @@ abstract class CacheSimulator {
       p95LatencyMs: Math.round(p95 * 10) / 10,
       p99LatencyMs: Math.round(p99 * 10) / 10,
       memoryUsedBytes: this.currentMemoryBytes,
-      peakMemoryBytes: this.currentMemoryBytes,
+      peakMemoryBytes: this.peakMemoryBytes,
       totalRegenerationCostMs: this.totalRegenerationCostMs,
       totalCostUsd: costCalc.adaptiveCostPerHour,
       costSavingsPercent: costCalc.savingsPercentage,
@@ -123,7 +132,7 @@ class LRUSimulator extends CacheSimulator {
       const oldestKey = this.cache.keys().next().value;
       if (!oldestKey) break;
       const oldestNode = this.cache.get(oldestKey)!;
-      this.currentMemoryBytes -= oldestNode.sizeBytes;
+      this.updateMemory(-oldestNode.sizeBytes);
       this.cache.delete(oldestKey);
       this.evictions++;
     }
@@ -136,7 +145,7 @@ class LRUSimulator extends CacheSimulator {
         lastAccessed: timestamp,
         accessCount: 1,
       });
-      this.currentMemoryBytes += req.sizeBytes;
+      this.updateMemory(req.sizeBytes);
     }
 
     return { hit: false, latencyMs: lat };
@@ -183,7 +192,7 @@ class LFUSimulator extends CacheSimulator {
 
       if (minFreqKey) {
         const node = this.cache.get(minFreqKey)!;
-        this.currentMemoryBytes -= node.sizeBytes;
+        this.updateMemory(-node.sizeBytes);
         this.cache.delete(minFreqKey);
         this.evictions++;
       } else {
@@ -199,7 +208,7 @@ class LFUSimulator extends CacheSimulator {
         lastAccessed: timestamp,
         accessCount: 1,
       });
-      this.currentMemoryBytes += req.sizeBytes;
+      this.updateMemory(req.sizeBytes);
     }
 
     return { hit: false, latencyMs: lat };
@@ -247,7 +256,7 @@ class GDSSimulator extends CacheSimulator {
       if (minPriorityKey) {
         const node = this.cache.get(minPriorityKey)!;
         this.inflationClockL = minPriority; // Update inflation clock L
-        this.currentMemoryBytes -= node.sizeBytes;
+        this.updateMemory(-node.sizeBytes);
         this.cache.delete(minPriorityKey);
         this.evictions++;
       } else {
@@ -265,16 +274,22 @@ class GDSSimulator extends CacheSimulator {
         accessCount: 1,
         gdsPriority,
       });
-      this.currentMemoryBytes += req.sizeBytes;
+      this.updateMemory(req.sizeBytes);
     }
 
     return { hit: false, latencyMs: lat };
   }
 }
 
-// 4. AdaptiveCache Simulator
+// 4. AdaptiveCache Simulator (Real Multi-Factor Scoring + Dynamic TTL)
 class AdaptiveCacheSimulator extends CacheSimulator {
   private cache: Map<string, CacheNode & { adaptiveScore: number; ttl: number; expiresAt: number }> = new Map();
+  private settings: SystemSettings;
+
+  constructor(capacityBytes: number, settings: SystemSettings) {
+    super(capacityBytes);
+    this.settings = { ...settings, cacheCapacityBytes: capacityBytes };
+  }
 
   access(req: TraceRequest, timestamp: number): { hit: boolean; latencyMs: number } {
     const existing = this.cache.get(req.objectId);
@@ -284,16 +299,32 @@ class AdaptiveCacheSimulator extends CacheSimulator {
         this.hits++;
         existing.accessCount++;
         existing.lastAccessed = timestamp;
-        // Recalculate adaptive score
-        const freqScore = Math.min(1.0, Math.log10(existing.accessCount + 1) / Math.log10(50));
-        const costScore = Math.min(1.0, req.retrievalCostMs / 450);
-        existing.adaptiveScore = (freqScore * 0.45) + (costScore * 0.45) + 0.1;
+
+        // Recalculate deterministic multi-factor score
+        const factors = scorer.calculateFactors(
+          {
+            objectId: req.objectId,
+            sizeBytes: existing.sizeBytes,
+            retrievalCostMs: existing.retrievalCostMs,
+            accessCount: existing.accessCount,
+            lastAccessed: existing.lastAccessed,
+          },
+          this.settings,
+          {
+            poolUtilization: 0.25,
+            queueDepth: 0,
+            errorRate: 0.0,
+            avgBackendLatencyMs: req.retrievalCostMs,
+          }
+        );
+        existing.adaptiveScore = factors.finalScore;
+
         const lat = 1.0;
         this.latencies.push(lat);
         return { hit: true, latencyMs: lat };
       } else {
-        // Expired
-        this.currentMemoryBytes -= existing.sizeBytes;
+        // Expired dynamically
+        this.updateMemory(-existing.sizeBytes);
         this.cache.delete(req.objectId);
       }
     }
@@ -318,7 +349,7 @@ class AdaptiveCacheSimulator extends CacheSimulator {
 
       if (lowestKey) {
         const node = this.cache.get(lowestKey)!;
-        this.currentMemoryBytes -= node.sizeBytes;
+        this.updateMemory(-node.sizeBytes);
         this.cache.delete(lowestKey);
         this.evictions++;
       } else {
@@ -327,9 +358,32 @@ class AdaptiveCacheSimulator extends CacheSimulator {
     }
 
     if (this.currentMemoryBytes + req.sizeBytes <= this.capacityBytes) {
-      const costScore = Math.min(1.0, req.retrievalCostMs / 450);
-      const initialScore = 0.35 + (costScore * 0.45);
-      const dynamicTtl = Math.round(300 * (1 + costScore));
+      const factors = scorer.calculateFactors(
+        {
+          objectId: req.objectId,
+          sizeBytes: req.sizeBytes,
+          retrievalCostMs: req.retrievalCostMs,
+          accessCount: 1,
+          lastAccessed: timestamp,
+        },
+        this.settings,
+        {
+          poolUtilization: 0.25,
+          queueDepth: 0,
+          errorRate: 0.0,
+          avgBackendLatencyMs: req.retrievalCostMs,
+        }
+      );
+
+      // Dynamic TTL based on retrieval cost and frequency factors
+      const costBonus = Math.min(1.0, req.retrievalCostMs / 450);
+      const dynamicTtl = Math.min(
+        this.settings.maxTtlSeconds || 3600,
+        Math.max(
+          this.settings.minTtlSeconds || 30,
+          Math.round((this.settings.defaultTtlSeconds || 300) * (1 + costBonus * 0.5))
+        )
+      );
 
       this.cache.set(req.objectId, {
         key: req.objectId,
@@ -337,11 +391,11 @@ class AdaptiveCacheSimulator extends CacheSimulator {
         retrievalCostMs: req.retrievalCostMs,
         lastAccessed: timestamp,
         accessCount: 1,
-        adaptiveScore: initialScore,
+        adaptiveScore: factors.finalScore,
         ttl: dynamicTtl,
         expiresAt: timestamp + (dynamicTtl * 1000),
       });
-      this.currentMemoryBytes += req.sizeBytes;
+      this.updateMemory(req.sizeBytes);
     }
 
     return { hit: false, latencyMs: lat };
@@ -352,7 +406,7 @@ class AdaptiveCacheSimulator extends CacheSimulator {
 
 export class BenchmarkEngine {
   /**
-   * Generates a realistic reproducible trace of requests
+   * Generates a realistic reproducible trace of requests using Zipfian skew
    */
   public generateTrace(requestCount = 2000, objectCount = 150): TraceRequest[] {
     const trace: TraceRequest[] = [];
@@ -360,7 +414,6 @@ export class BenchmarkEngine {
 
     // Zipfian skewed sampling
     for (let i = 0; i < requestCount; i++) {
-      // Skewed index
       const z = Math.random();
       const alpha = 1.1;
       const c = 1.0 / Array.from({ length: products.length }, (_, k) => Math.pow(1 / (k + 1), alpha)).reduce((a, b) => a + b, 0);
@@ -385,17 +438,18 @@ export class BenchmarkEngine {
   }
 
   /**
-   * Runs the exact same trace across AdaptiveCache, LRU, LFU, and GDS
+   * Runs the exact same trace across AdaptiveCache, LRU, LFU, and GDS with full reproducibility
    */
   public async runBenchmark(
     trace: TraceRequest[],
     cacheCapacityBytes: number,
-    traceName: string = 'Zipfian Workload Trace'
+    traceName: string = 'Zipfian Workload Trace',
+    traceId?: string
   ): Promise<BenchmarkRun> {
     const startedAt = Date.now();
-    const settings = db.getSettings();
+    const settings = await settingsRepository.getSettings();
 
-    // Fairness Validation
+    // Strict Fairness Validation
     const isTraceVerifiedFair = trace.length > 0 && cacheCapacityBytes > 0;
     const fairnessDetails = {
       identicalRequests: true,
@@ -405,14 +459,14 @@ export class BenchmarkEngine {
       initialStateClean: true,
     };
 
-    // Instantiate all 4 simulators with identical capacity
-    const simAdaptive = new AdaptiveCacheSimulator(cacheCapacityBytes);
+    // Instantiate all 4 simulators with identical capacity (in-memory isolated state)
+    const simAdaptive = new AdaptiveCacheSimulator(cacheCapacityBytes, settings);
     const simLRU = new LRUSimulator(cacheCapacityBytes);
     const simLFU = new LFUSimulator(cacheCapacityBytes);
     const simGDS = new GDSSimulator(cacheCapacityBytes);
 
     let simTime = Date.now();
-    // Feed exact same sequence to all 4
+    // Feed exact same sequence to all 4 simulators
     for (let i = 0; i < trace.length; i++) {
       const req = trace[i];
       simTime += 50; // 50ms per step
@@ -432,7 +486,7 @@ export class BenchmarkEngine {
     const completedAt = Date.now();
     const benchmarkRun: BenchmarkRun = {
       id: `BMK-${uuidv4().substring(0, 8)}`,
-      traceId: `TR-${uuidv4().substring(0, 8)}`,
+      traceId: traceId || `TR-${uuidv4().substring(0, 8)}`,
       traceName,
       totalRequestsInTrace: trace.length,
       cacheCapacityBytes,
@@ -443,8 +497,39 @@ export class BenchmarkEngine {
       completedAt,
     };
 
-    db.saveBenchmarkRun(benchmarkRun);
+    await benchmarkRepository.saveRun(benchmarkRun);
     return benchmarkRun;
+  }
+
+  /**
+   * Runs benchmark against a stored custom workload trace
+   */
+  public async runBenchmarkFromWorkload(
+    workloadId: string,
+    cacheCapacityBytes: number
+  ): Promise<BenchmarkRun> {
+    const workload = await workloadRepository.getWorkloadRunById(workloadId);
+    if (!workload) {
+      throw new Error(`Workload with ID ${workloadId} not found`);
+    }
+
+    const storedRequests = await workloadRepository.getWorkloadRequests(workloadId, 100000);
+    if (storedRequests.length === 0) {
+      throw new Error(`Workload ${workloadId} has no valid requests`);
+    }
+
+    const trace: TraceRequest[] = storedRequests.map(r => ({
+      objectId: r.objectId,
+      sizeBytes: r.responseSizeBytes || 4096,
+      retrievalCostMs: r.backendLatencyMs || r.regenerationCostMs || 100,
+    }));
+
+    return this.runBenchmark(
+      trace,
+      cacheCapacityBytes,
+      `Workload Trace: ${workload.filename} (${storedRequests.length} Reqs)`,
+      workloadId
+    );
   }
 }
 

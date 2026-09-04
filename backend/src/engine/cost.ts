@@ -12,6 +12,7 @@ export interface CostBreakdown {
   netSavingsPerHour: number;
   netSavingsMonthly: number;
   savingsPercentage: number;
+  roiPercentage: number;
   backendLoadReductionPercent: number;
   components: {
     memoryCostPerHour: number;
@@ -66,17 +67,20 @@ export class CostEngine {
       egressCostPerHour;
 
     const netSavingsPerHour = Math.max(0, baselineCostPerHour - adaptiveCostPerHour);
-    const netSavingsMonthly = netSavingsPerHour * 730; // 730 hours/month average
+    const roundedNetSavingsPerHour = Math.round(netSavingsPerHour * 1000) / 1000;
+    const netSavingsMonthly = Math.round(roundedNetSavingsPerHour * 730 * 100) / 100;
     const savingsPercentage = baselineCostPerHour > 0 ? (netSavingsPerHour / baselineCostPerHour) * 100 : 0;
+    const roiPercentage = adaptiveCostPerHour > 0 ? (netSavingsPerHour / adaptiveCostPerHour) * 100 : 0;
     const loadReduction = totalReq > 0 ? ((totalReq - backendReq) / totalReq) * 100 : 0;
 
     return {
       disclaimer: 'Estimated cost based on measured workload and configured infrastructure assumptions.',
       baselineCostPerHour: Math.round(baselineCostPerHour * 1000) / 1000,
       adaptiveCostPerHour: Math.round(adaptiveCostPerHour * 1000) / 1000,
-      netSavingsPerHour: Math.round(netSavingsPerHour * 1000) / 1000,
-      netSavingsMonthly: Math.round(netSavingsMonthly * 100) / 100,
+      netSavingsPerHour: roundedNetSavingsPerHour,
+      netSavingsMonthly,
       savingsPercentage: Math.round(savingsPercentage * 10) / 10,
+      roiPercentage: Math.round(roiPercentage * 10) / 10,
       backendLoadReductionPercent: Math.round(loadReduction * 10) / 10,
       components: {
         memoryCostPerHour: Math.round(memoryCostPerHour * 1000) / 1000,

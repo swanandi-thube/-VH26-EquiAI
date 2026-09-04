@@ -346,6 +346,11 @@ export interface WhatIfScenarioInput {
   cacheCapacityMb: number;   // 50MB to 2048MB
   backendLatencyMs: number;  // 10ms to 500ms
   backendErrorRate: number;  // 0% to 50%
+  ttlSeconds?: number;       // dynamic TTL simulation
+  requestRateRps?: number;   // custom RPS
+  demandMultiplier?: number; // demand surge
+  algorithm?: CacheStrategy; // ADAPTIVE | LRU | LFU | GDS
+  workloadId?: string;       // trace reference
 }
 
 export interface WhatIfComparison {
@@ -370,6 +375,25 @@ export interface WhatIfComparison {
     costDeltaUsd: number;
     memoryDeltaMb: number;
   };
+}
+
+export interface CostBreakdown {
+  disclaimer: string;
+  baselineCostPerHour: number;
+  adaptiveCostPerHour: number;
+  netSavingsPerHour: number;
+  netSavingsMonthly: number;
+  savingsPercentage: number;
+  roiPercentage: number;
+  backendLoadReductionPercent: number;
+  components: {
+    memoryCostPerHour: number;
+    backendComputeCostPerHour: number;
+    databaseIoCostPerHour: number;
+    backendRequestCostPerHour: number;
+    egressCostPerHour: number;
+  };
+  assumptions: SystemSettings['costAssumptions'];
 }
 
 export interface SystemHealthReport {

@@ -1,7 +1,7 @@
 /**
  * What-If Scenario Analysis Engine
  * Deterministically evaluates counterfactual parameter projections
- * against real traffic distributions and cache capacity models.
+ * against real traffic distributions, dynamic TTL curves, algorithms, and cache capacity models.
  */
 
 import { WhatIfComparison, WhatIfScenarioInput, SystemSettings, TelemetrySnapshot } from '../types';
@@ -20,33 +20,55 @@ export class WhatIfEngine {
     const currentCost = currentTelemetry.estimatedCostPerHourUsd || 1.45;
     const currentMemMb = Math.round((currentTelemetry.memoryUsedBytes || 32000000) / (1024 * 1024));
 
-    // Counterfactual Projections:
-    // 1. Capacity impact on Hit Rate: Diminishing returns logarithmic curve based on Zipfian cache size law
+    // 1. Capacity impact on Hit Rate: Diminishing returns curve based on Zipfian cache size law
     const baseCapacityMb = settings.cacheCapacityBytes / (1024 * 1024);
     const capacityRatio = scenario.cacheCapacityMb / Math.max(1, baseCapacityMb);
-    // Hit rate scales with power of capacity ratio: HR_proj = 1 - (1 - HR_curr) * (capacityRatio ^ -0.22)
     const missRateBase = Math.max(0.05, 1 - currentHitRate);
-    const projectedMissRate = Math.max(0.02, Math.min(0.95, missRateBase * Math.pow(capacityRatio, -0.22)));
-    let projectedHitRate = 1 - projectedMissRate;
+    let projectedMissRate = Math.max(0.02, Math.min(0.95, missRateBase * Math.pow(capacityRatio, -0.22)));
 
-    // Traffic spike impact on hit rate (at extreme traffic multipliers, slight degradation if hot sets churn)
-    if (scenario.trafficMultiplier > 2.5) {
-      projectedHitRate = Math.max(0.3, projectedHitRate - ((scenario.trafficMultiplier - 2.5) * 0.02));
+    // 2. Dynamic TTL Adjustment Factor
+    if (scenario.ttlSeconds && scenario.ttlSeconds > 0) {
+      const baseTtl = settings.defaultTtlSeconds || 300;
+      const ttlRatio = scenario.ttlSeconds / baseTtl;
+      // Longer TTL retains objects longer, shorter TTL expels sooner
+      projectedMissRate = Math.max(0.02, Math.min(0.95, projectedMissRate * Math.pow(ttlRatio, -0.12)));
     }
 
-    // 2. Projected Backend Latency and Average Total Latency
-    const projectedBackendLatency = scenario.backendLatencyMs;
-    const cacheHitLatency = 1.2; // ms (Redis lookup)
+    // 3. Algorithm efficiency factor
+    let algoMultiplier = 1.0;
+    if (scenario.algorithm === 'LRU') algoMultiplier = 1.06;
+    else if (scenario.algorithm === 'LFU') algoMultiplier = 1.08;
+    else if (scenario.algorithm === 'GDS') algoMultiplier = 1.04;
+    else if (scenario.algorithm === 'ADAPTIVE') algoMultiplier = 1.0;
+
+    projectedMissRate = Math.min(0.98, projectedMissRate * algoMultiplier);
+    let projectedHitRate = 1 - projectedMissRate;
+
+    // Traffic & Demand Surge impact on hit rate (at extreme traffic multipliers, slight degradation if working set churns)
+    const trafficMultiplier = scenario.trafficMultiplier || 1.0;
+    const demandMultiplier = scenario.demandMultiplier || 1.0;
+    const effectiveTrafficMultiplier = trafficMultiplier * demandMultiplier;
+
+    if (effectiveTrafficMultiplier > 2.5) {
+      projectedHitRate = Math.max(0.25, projectedHitRate - ((effectiveTrafficMultiplier - 2.5) * 0.02));
+    }
+
+    // 4. Projected Backend Latency and Average Total Latency
+    const errorRate = Math.min(1.0, Math.max(0, scenario.backendErrorRate || 0));
+    // Error conditions incur retry delays / timeout penalties
+    const projectedBackendLatency = scenario.backendLatencyMs * (1 + errorRate * 0.5);
+    const cacheHitLatency = 1.2; // ms (Redis in-memory lookup)
     const projectedAvgLatency = (projectedHitRate * cacheHitLatency) + ((1 - projectedHitRate) * projectedBackendLatency);
 
-    // 3. Projected Backend Load Ratio
+    // 5. Projected Backend Load Ratio
     const projectedBackendLoad = 1 - projectedHitRate;
 
-    // 4. Projected Memory Usage
+    // 6. Projected Memory Usage
     const projectedMemMb = Math.min(scenario.cacheCapacityMb, Math.round(currentMemMb * Math.min(2.0, Math.pow(capacityRatio, 0.7))));
 
-    // 5. Projected Cost
-    const projectedTotalReqPerHour = (currentTelemetry.requestsPerSecond || 50) * 3600 * scenario.trafficMultiplier;
+    // 7. Projected Cost
+    const baseRps = scenario.requestRateRps || currentTelemetry.requestsPerSecond || 50;
+    const projectedTotalReqPerHour = baseRps * 3600 * effectiveTrafficMultiplier;
     const projectedBackendReqPerHour = projectedTotalReqPerHour * (1 - projectedHitRate);
     const costProjection = costEngine.calculateCost(
       {

@@ -179,6 +179,24 @@ export class MigrationRunner {
         CREATE INDEX IF NOT EXISTS idx_object_observations_obj_time ON object_observations(object_id, timestamp DESC);
       `);
 
+      // 10. benchmark_runs and benchmark_results tables (Phase 8 Multi-Strategy Benchmark)
+      await dbClient.query(`
+        CREATE TABLE IF NOT EXISTS benchmark_runs (
+          id VARCHAR(64) PRIMARY KEY,
+          trace_id VARCHAR(64) NOT NULL,
+          trace_name VARCHAR(255) NOT NULL,
+          total_requests_in_trace INT NOT NULL,
+          cache_capacity_bytes BIGINT NOT NULL,
+          is_trace_verified_fair BOOLEAN NOT NULL DEFAULT TRUE,
+          fairness_details JSONB NOT NULL DEFAULT '{}'::jsonb,
+          results JSONB NOT NULL DEFAULT '[]'::jsonb,
+          started_at BIGINT NOT NULL,
+          completed_at BIGINT NOT NULL,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_benchmark_runs_time ON benchmark_runs(started_at DESC);
+      `);
+
       console.log('[Migrations] All PostgreSQL tables and indexes created successfully.');
       return true;
     } catch (err: any) {

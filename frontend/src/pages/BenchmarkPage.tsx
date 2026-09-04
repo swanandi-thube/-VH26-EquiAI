@@ -22,10 +22,12 @@ import {
   Legend
 } from 'recharts';
 import { apiClient } from '../api/client';
-import { BenchmarkRun } from '../types';
+import { BenchmarkRun, WorkloadUploadSummary } from '../types';
 
 export const BenchmarkPage: React.FC = () => {
   const [runs, setRuns] = useState<BenchmarkRun[]>([]);
+  const [workloads, setWorkloads] = useState<WorkloadUploadSummary[]>([]);
+  const [selectedWorkloadId, setSelectedWorkloadId] = useState<string>('synthetic');
   const [selectedRun, setSelectedRun] = useState<BenchmarkRun | null>(null);
   const [isRunningBenchmark, setIsRunningBenchmark] = useState(false);
   const [requestCount, setRequestCount] = useState(2500);
@@ -43,18 +45,38 @@ export const BenchmarkPage: React.FC = () => {
     }
   };
 
+  const fetchWorkloads = async () => {
+    try {
+      const data = await apiClient.getWorkloadRuns();
+      setWorkloads(data || []);
+    } catch (err) {
+      console.warn('Error loading workloads for benchmark:', err);
+    }
+  };
+
   useEffect(() => {
     fetchRuns();
+    fetchWorkloads();
   }, []);
 
   const handleRunNewBenchmark = async () => {
     setIsRunningBenchmark(true);
     try {
-      const result = await apiClient.runBenchmark({
-        requestCount,
-        capacityMb,
-        traceName: `Fair Trace (${requestCount} Reqs, ${capacityMb}MB)`,
-      });
+      let result;
+      if (selectedWorkloadId === 'synthetic') {
+        result = await apiClient.runBenchmark({
+          requestCount,
+          capacityMb,
+          traceName: `Fair Zipfian Trace (${requestCount} Reqs, ${capacityMb}MB)`,
+        });
+      } else {
+        const found = workloads.find(w => (w.workloadId || w.workload_id) === selectedWorkloadId);
+        result = await apiClient.runBenchmark({
+          workloadId: selectedWorkloadId,
+          capacityMb,
+          traceName: `Workload Trace: ${found?.filename || selectedWorkloadId} (${capacityMb}MB)`,
+        });
+      }
       setSelectedRun(result);
       await fetchRuns();
     } catch (err: any) {
@@ -119,20 +141,42 @@ export const BenchmarkPage: React.FC = () => {
         </div>
 
         {/* Trace Parameter Selectors */}
-        <div className="flex items-center gap-3 font-mono text-xs">
+        <div className="flex flex-wrap items-center gap-3 font-mono text-xs">
           <div className="flex items-center gap-1.5 bg-dark-850 border border-dark-700 rounded-lg px-3 py-1.5">
-            <span className="text-stone-400">Requests:</span>
+            <span className="text-stone-400">Trace:</span>
             <select
-              value={requestCount}
-              onChange={(e) => setRequestCount(parseInt(e.target.value, 10))}
+              value={selectedWorkloadId}
+              onChange={(e) => setSelectedWorkloadId(e.target.value)}
               disabled={isRunningBenchmark}
-              className="bg-transparent text-stone-100 font-bold focus:outline-none"
+              className="bg-transparent text-amber-400 font-bold focus:outline-none max-w-[160px] truncate"
             >
-              <option value="1000">1,000 reqs</option>
-              <option value="2500">2,500 reqs</option>
-              <option value="5000">5,000 reqs</option>
+              <option value="synthetic" className="bg-dark-900 text-stone-100">Synthetic (Zipfian)</option>
+              {workloads.map((w) => {
+                const wid = w.workloadId || w.workload_id || '';
+                return (
+                  <option key={wid} value={wid} className="bg-dark-900 text-stone-100">
+                    {w.filename} ({w.validRows || w.valid_rows || 0} reqs)
+                  </option>
+                );
+              })}
             </select>
           </div>
+
+          {selectedWorkloadId === 'synthetic' && (
+            <div className="flex items-center gap-1.5 bg-dark-850 border border-dark-700 rounded-lg px-3 py-1.5">
+              <span className="text-stone-400">Requests:</span>
+              <select
+                value={requestCount}
+                onChange={(e) => setRequestCount(parseInt(e.target.value, 10))}
+                disabled={isRunningBenchmark}
+                className="bg-transparent text-stone-100 font-bold focus:outline-none"
+              >
+                <option value="1000" className="bg-dark-900">1,000 reqs</option>
+                <option value="2500" className="bg-dark-900">2,500 reqs</option>
+                <option value="5000" className="bg-dark-900">5,000 reqs</option>
+              </select>
+            </div>
+          )}
 
           <div className="flex items-center gap-1.5 bg-dark-850 border border-dark-700 rounded-lg px-3 py-1.5">
             <span className="text-stone-400">Capacity:</span>
@@ -142,9 +186,10 @@ export const BenchmarkPage: React.FC = () => {
               disabled={isRunningBenchmark}
               className="bg-transparent text-stone-100 font-bold focus:outline-none"
             >
-              <option value="16">16 MB</option>
-              <option value="32">32 MB</option>
-              <option value="64">64 MB</option>
+              <option value="16" className="bg-dark-900">16 MB</option>
+              <option value="32" className="bg-dark-900">32 MB</option>
+              <option value="64" className="bg-dark-900">64 MB</option>
+              <option value="128" className="bg-dark-900">128 MB</option>
             </select>
           </div>
         </div>
