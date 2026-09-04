@@ -77,6 +77,9 @@ apiRouter.delete('/workloads/:id', (req: Request, res: Response) => workloadCont
 apiRouter.post('/workloads/start', (req: Request, res: Response) => workloadController.startWorkload(req, res));
 apiRouter.post('/workloads/stop', (req: Request, res: Response) => workloadController.stopWorkload(req, res));
 apiRouter.get('/workloads/active', (req: Request, res: Response) => workloadController.getActiveWorkload(req, res));
+apiRouter.post('/workloads/:id/replay', (req: Request, res: Response) => workloadController.replayWorkload(req, res));
+apiRouter.post('/workloads/replay/stop', (req: Request, res: Response) => workloadController.stopReplay(req, res));
+apiRouter.get('/workloads/replay/status', (req: Request, res: Response) => workloadController.getReplayStatus(req, res));
 
 // --- Backend Protection & Concurrency Defense ---
 apiRouter.get('/protection/stats', (req: Request, res: Response) => protectionController.getStats(req, res));

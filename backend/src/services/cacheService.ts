@@ -23,6 +23,8 @@ import { dbClient } from '../database/client';
 import { circuitBreaker } from '../protection/circuitBreaker';
 import { coalescer } from '../protection/coalescing';
 import { rateLimiter } from '../protection/rateLimiter';
+import { requestQueue } from '../protection/requestQueue';
+import { retryController } from '../protection/retryController';
 import { RequestLog, CacheObjectMetadata } from '../types';
 
 export interface CacheRequestResult {
@@ -200,8 +202,28 @@ export class CacheService {
     // =========================================================================
     // CACHE MISS PATH
     // =========================================================================
-    // 4. Check Circuit Breaker before calling origin
+    // 4. Check Circuit Breaker & Cache-First Protection before calling origin
     if (!circuitBreaker.canExecute()) {
+      // Stale-While-Error Cache-First Defense
+      if (cacheResult.value !== null) {
+        let parsedData: any;
+        try { parsedData = JSON.parse(cacheResult.value); } catch { parsedData = cacheResult.value; }
+        const totalLatencyMs = Math.max(1, Date.now() - startTotalTime);
+        return {
+          requestId,
+          objectId,
+          cacheHit: true,
+          backendCalled: false,
+          cacheLatencyMs,
+          backendLatencyMs: 0,
+          totalLatencyMs,
+          statusCode: 200,
+          data: parsedData,
+          responseSizeBytes: cacheResult.metadata?.sizeBytes || 0,
+          metadata: cacheResult.metadata,
+        };
+      }
+
       const totalLatencyMs = Date.now() - startTotalTime;
       const log: RequestLog = {
         requestId,
@@ -241,13 +263,37 @@ export class CacheService {
       };
     }
 
-    // 5. Fetch from Origin with Singleflight Coalescing
-    const { result: originResult, wasCoalesced } = await coalescer.execute(cacheKey, async () => {
-      return await this.originAdapter.fetchObject(objectId, {
-        simulatedLatencyMs: options?.simulatedLatencyMs,
-        simulatedErrorRate: options?.simulatedErrorRate,
+    // 5. Fetch from Origin with Singleflight Coalescing, Request Queue & Retry Control
+    let originResult: any;
+    let wasCoalesced = false;
+
+    try {
+      const coalRes = await coalescer.execute(cacheKey, async () => {
+        return await requestQueue.enqueue(async () => {
+          return await retryController.executeWithRetry(async () => {
+            const fetchRes = await this.originAdapter.fetchObject(objectId, {
+              simulatedLatencyMs: options?.simulatedLatencyMs,
+              simulatedErrorRate: options?.simulatedErrorRate,
+            });
+            if (fetchRes.statusCode >= 500) {
+              throw new Error(`Origin backend error: HTTP ${fetchRes.statusCode}`);
+            }
+            return fetchRes;
+          });
+        });
       });
-    });
+      originResult = coalRes.result;
+      wasCoalesced = coalRes.wasCoalesced;
+    } catch (err: any) {
+      originResult = {
+        objectId,
+        data: null,
+        sizeBytes: 0,
+        retrievalCostMs: options?.simulatedLatencyMs || 50,
+        statusCode: err.message?.includes('404') ? 404 : 503,
+        errorMessage: err.message || 'Origin fetch failed',
+      };
+    }
 
     const isSuccess = originResult.statusCode === 200 && originResult.data !== null;
     circuitBreaker.recordResult(isSuccess);

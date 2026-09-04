@@ -385,6 +385,56 @@ export interface SystemHealthReport {
   };
 }
 
+export interface ReplayConfig {
+  workloadId: string;
+  requestsPerSecond?: number;
+  concurrency?: number;
+  cacheCapacityMb?: number;
+  ttlSeconds?: number;
+  burstTraffic?: boolean;
+  speedMultiplier?: number;
+}
+
+export interface ReplayMetrics {
+  replayId: string;
+  workloadId: string;
+  filename: string;
+  status: 'IDLE' | 'RUNNING' | 'PAUSED' | 'COMPLETED' | 'STOPPED' | 'FAILED';
+  totalRequestsInTrace: number;
+  requestsCompleted: number;
+  cacheHits: number;
+  cacheMisses: number;
+  backendCalls: number;
+  evictionsCount: number;
+  errorsCount: number;
+  hitRate: number;
+  avgLatencyMs: number;
+  p50LatencyMs: number;
+  p95LatencyMs: number;
+  currentRps: number;
+  concurrency: number;
+  startedAt: number;
+  completedAt?: number;
+  errorMessage?: string;
+}
+
+export interface RequestQueueStats {
+  queueDepth: number;
+  activeRequests: number;
+  waitingRequests: number;
+  rejectedRequests: number;
+  maxConcurrency: number;
+  maxQueueDepth: number;
+  averageWaitTimeMs: number;
+}
+
+export interface RetryControllerStats {
+  totalRetries: number;
+  successfulRetries: number;
+  exhaustedRetries: number;
+  maxRetries: number;
+}
+
 export interface ProtectionStats {
   coalescing: {
     incomingRequests: number;
@@ -400,6 +450,8 @@ export interface ProtectionStats {
     rejectedCalls: number;
     errorRate: number;
     lastStateChange: number;
+    lastFailureTime?: number;
+    recoveryTimeMs?: number;
     timeUntilHalfOpenMs: number;
   };
   rateLimiter: {
@@ -410,6 +462,8 @@ export interface ProtectionStats {
     allowedRequests: number;
     throttledRequests: number;
   };
+  queue?: RequestQueueStats;
+  retry?: RetryControllerStats;
   pool: {
     activeConnections: number;
     maxPoolSize: number;

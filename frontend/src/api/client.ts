@@ -141,6 +141,29 @@ export const apiClient = {
     return json.data;
   },
 
+  async replayWorkload(workloadId: string, options: any = {}): Promise<any> {
+    const res = await fetch(`${API_BASE}/workloads/${workloadId}/replay`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(options),
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.message || 'Replay failed');
+    return json.data;
+  },
+
+  async stopReplay(): Promise<any> {
+    const res = await fetch(`${API_BASE}/workloads/replay/stop`, { method: 'POST' });
+    const json = await res.json();
+    return json.data;
+  },
+
+  async getReplayStatus(): Promise<{ isReplaying: boolean; metrics: any | null }> {
+    const res = await fetch(`${API_BASE}/workloads/replay/status`);
+    const json = await res.json();
+    return json.data;
+  },
+
   async getProtectionStats(): Promise<ProtectionStats> {
     const res = await fetch(`${API_BASE}/protection/stats`);
     const json = await res.json();

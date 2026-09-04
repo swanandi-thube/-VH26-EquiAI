@@ -38,7 +38,7 @@ import {
 } from 'recharts';
 import { useTelemetryContext } from '../context/TelemetryContext';
 import { apiClient } from '../api/client';
-import { WorkloadConfig, WorkloadType, WorkloadUploadSummary } from '../types';
+import { WorkloadConfig, WorkloadType, WorkloadUploadSummary, ReplayMetrics } from '../types';
 
 export const TrafficLabPage: React.FC = () => {
   const {
@@ -73,6 +73,39 @@ export const TrafficLabPage: React.FC = () => {
   const [showValidationErrors, setShowValidationErrors] = useState<boolean>(false);
   const [historicalRuns, setHistoricalRuns] = useState<WorkloadUploadSummary[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState<boolean>(false);
+
+  // Replay State
+  const [selectedReplayTrace, setSelectedReplayTrace] = useState<WorkloadUploadSummary | null>(null);
+  const [replayRps, setReplayRps] = useState<number>(100);
+  const [replayConcurrency, setReplayConcurrency] = useState<number>(5);
+  const [replayCapacityMb, setReplayCapacityMb] = useState<number>(64);
+  const [replayBurst, setReplayBurst] = useState<boolean>(false);
+  const [replayMetrics, setReplayMetrics] = useState<ReplayMetrics | null>(null);
+  const [isReplaying, setIsReplaying] = useState<boolean>(false);
+  const [replayError, setReplayError] = useState<string | null>(null);
+
+  // Poll replay status
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    if (isReplaying) {
+      interval = setInterval(async () => {
+        try {
+          const res = await apiClient.getReplayStatus();
+          if (res && res.metrics) {
+            setReplayMetrics(res.metrics);
+            if (!res.isReplaying || res.metrics.status === 'COMPLETED' || res.metrics.status === 'STOPPED' || res.metrics.status === 'FAILED') {
+              setIsReplaying(false);
+            }
+          }
+        } catch (e) {
+          // ignore
+        }
+      }, 1000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isReplaying]);
 
   const scenarioPresets: {
     type: WorkloadType;
@@ -264,6 +297,35 @@ export const TrafficLabPage: React.FC = () => {
       setServerError(err.message || 'Server error occurred during workload ingestion.');
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const handleStartReplay = async (run: WorkloadUploadSummary) => {
+    setSelectedReplayTrace(run);
+    setIsReplaying(true);
+    setReplayError(null);
+    try {
+      const res = await apiClient.replayWorkload(run.workload_id || run.workloadId, {
+        requestsPerSecond: replayRps,
+        concurrency: replayConcurrency,
+        cacheCapacityMb: replayCapacityMb,
+        burstTraffic: replayBurst,
+      });
+      setReplayMetrics(res);
+    } catch (err: any) {
+      setReplayError(err.message || 'Failed to start replay.');
+      setIsReplaying(false);
+    }
+  };
+
+  const handleStopReplay = async () => {
+    try {
+      const res = await apiClient.stopReplay();
+      setReplayMetrics(res);
+    } catch (err: any) {
+      console.warn('Error stopping replay:', err);
+    } finally {
+      setIsReplaying(false);
     }
   };
 
@@ -684,7 +746,15 @@ export const TrafficLabPage: React.FC = () => {
                         <td className="py-3 text-stone-400 text-[11px]">
                           {new Date(run.uploaded_at || run.uploadedAt).toLocaleString()}
                         </td>
-                        <td className="py-3 text-right">
+                        <td className="py-3 text-right flex items-center justify-end">
+                          <button
+                            onClick={() => handleStartReplay(run)}
+                            disabled={isReplaying}
+                            className="p-1.5 hover:bg-amber-500/10 hover:text-amber-400 text-stone-400 rounded-lg transition-colors cursor-pointer mr-1 disabled:opacity-40"
+                            title="Replay trace against real cache engine"
+                          >
+                            <Play className="w-3.5 h-3.5 fill-current" />
+                          </button>
                           <button
                             onClick={(e) => handleDeleteRun(run.workload_id || run.workloadId, e)}
                             className="p-1.5 hover:bg-rose-500/10 hover:text-brand-rose text-stone-500 rounded-lg transition-colors cursor-pointer"
@@ -697,6 +767,141 @@ export const TrafficLabPage: React.FC = () => {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {/* Live Replay Execution Panel */}
+            {replayMetrics && (
+              <div className="mt-4 p-5 bg-dark-850 border border-amber-500/30 rounded-xl space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-dark-750">
+                  <div className="flex items-center gap-2.5">
+                    <FlaskConical className="w-4 h-4 text-amber-400" />
+                    <div>
+                      <span className="text-xs font-bold text-stone-100 font-mono">
+                        Replay: {replayMetrics.filename} ({replayMetrics.replayId})
+                      </span>
+                      <div className="text-[10px] text-stone-400 font-mono">
+                        Workload ID: {replayMetrics.workloadId} &bull; Concurrency: {replayMetrics.concurrency} workers
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`text-[10px] font-bold px-2.5 py-1 rounded-full border ${
+                        replayMetrics.status === 'RUNNING'
+                          ? 'text-amber-400 bg-amber-500/10 border-amber-500/30 animate-pulse'
+                          : replayMetrics.status === 'COMPLETED'
+                          ? 'text-brand-emerald bg-brand-emerald/10 border-brand-emerald/30'
+                          : 'text-stone-400 bg-dark-800 border-dark-700'
+                      }`}
+                    >
+                      {replayMetrics.status}
+                    </span>
+
+                    {isReplaying ? (
+                      <button
+                        onClick={handleStopReplay}
+                        className="flex items-center gap-1 px-3 py-1 bg-brand-rose hover:bg-rose-600 text-white text-xs font-mono font-bold rounded-lg cursor-pointer transition-colors"
+                      >
+                        <Square className="w-3 h-3 fill-white" />
+                        Stop Replay
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => setReplayMetrics(null)}
+                        className="px-2.5 py-1 bg-dark-800 hover:bg-dark-750 text-stone-400 hover:text-stone-200 text-xs font-mono rounded-lg transition-colors cursor-pointer"
+                      >
+                        Dismiss
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Progress Bar */}
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[11px] font-mono text-stone-400">
+                    <span>
+                      Progress: {replayMetrics.requestsCompleted} / {replayMetrics.totalRequestsInTrace} requests
+                    </span>
+                    <span>
+                      {replayMetrics.totalRequestsInTrace > 0
+                        ? Math.round((replayMetrics.requestsCompleted / replayMetrics.totalRequestsInTrace) * 100)
+                        : 0}
+                      %
+                    </span>
+                  </div>
+                  <div className="w-full h-2 bg-dark-800 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-amber-500 to-amber-400 transition-all duration-300"
+                      style={{
+                        width: `${
+                          replayMetrics.totalRequestsInTrace > 0
+                            ? Math.min(100, Math.round((replayMetrics.requestsCompleted / replayMetrics.totalRequestsInTrace) * 100))
+                            : 0
+                        }%`,
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Real Replay Metrics Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 pt-2">
+                  <div className="p-2.5 bg-dark-900 rounded-lg border border-dark-750">
+                    <span className="text-[10px] font-mono text-stone-400 uppercase">Cache Hits</span>
+                    <div className="text-base font-bold font-mono text-brand-emerald mt-0.5">
+                      {replayMetrics.cacheHits}
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 bg-dark-900 rounded-lg border border-dark-750">
+                    <span className="text-[10px] font-mono text-stone-400 uppercase">Cache Misses</span>
+                    <div className="text-base font-bold font-mono text-stone-300 mt-0.5">
+                      {replayMetrics.cacheMisses}
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 bg-dark-900 rounded-lg border border-dark-750">
+                    <span className="text-[10px] font-mono text-stone-400 uppercase">Hit Rate</span>
+                    <div className="text-base font-bold font-mono text-amber-400 mt-0.5">
+                      {(replayMetrics.hitRate * 100).toFixed(1)}%
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 bg-dark-900 rounded-lg border border-dark-750">
+                    <span className="text-[10px] font-mono text-stone-400 uppercase">Backend Calls</span>
+                    <div className="text-base font-bold font-mono text-orange-400 mt-0.5">
+                      {replayMetrics.backendCalls}
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 bg-dark-900 rounded-lg border border-dark-750">
+                    <span className="text-[10px] font-mono text-stone-400 uppercase">Avg Latency</span>
+                    <div className="text-base font-bold font-mono text-stone-200 mt-0.5">
+                      {replayMetrics.avgLatencyMs} ms
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 bg-dark-900 rounded-lg border border-dark-750">
+                    <span className="text-[10px] font-mono text-stone-400 uppercase">Evictions</span>
+                    <div className="text-base font-bold font-mono text-purple-400 mt-0.5">
+                      {replayMetrics.evictionsCount}
+                    </div>
+                  </div>
+
+                  <div className="p-2.5 bg-dark-900 rounded-lg border border-dark-750">
+                    <span className="text-[10px] font-mono text-stone-400 uppercase">Errors</span>
+                    <div className="text-base font-bold font-mono text-rose-400 mt-0.5">
+                      {replayMetrics.errorsCount}
+                    </div>
+                  </div>
+                </div>
+
+                {replayError && (
+                  <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-lg text-xs font-mono text-rose-300">
+                    Replay Error: {replayError}
+                  </div>
+                )}
               </div>
             )}
           </div>

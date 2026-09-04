@@ -62,6 +62,9 @@ exports.apiRouter.delete('/workloads/:id', (req, res) => controllers_1.workloadC
 exports.apiRouter.post('/workloads/start', (req, res) => controllers_1.workloadController.startWorkload(req, res));
 exports.apiRouter.post('/workloads/stop', (req, res) => controllers_1.workloadController.stopWorkload(req, res));
 exports.apiRouter.get('/workloads/active', (req, res) => controllers_1.workloadController.getActiveWorkload(req, res));
+exports.apiRouter.post('/workloads/:id/replay', (req, res) => controllers_1.workloadController.replayWorkload(req, res));
+exports.apiRouter.post('/workloads/replay/stop', (req, res) => controllers_1.workloadController.stopReplay(req, res));
+exports.apiRouter.get('/workloads/replay/status', (req, res) => controllers_1.workloadController.getReplayStatus(req, res));
 // --- Backend Protection & Concurrency Defense ---
 exports.apiRouter.get('/protection/stats', (req, res) => controllers_1.protectionController.getStats(req, res));
 exports.apiRouter.post('/protection/reset', (req, res) => controllers_1.protectionController.resetStats(req, res));

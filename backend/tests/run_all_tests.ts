@@ -21,6 +21,9 @@ import { explainability } from '../src/engine/explainability';
 import { changeDetector } from '../src/engine/changeDetector';
 import { observationRepository, decisionRepository, settingsRepository } from '../src/repositories';
 import { observationController } from '../src/controllers/observationController';
+import { replayRunner } from '../src/workload/replayRunner';
+import { requestQueue } from '../src/protection/requestQueue';
+import { retryController } from '../src/protection/retryController';
 
 let passed = 0;
 let failed = 0;
@@ -684,6 +687,155 @@ async function runTests() {
     factorsB.finalScore > factorsA.finalScore,
     `12.6 High-demand/high-cost item (score ${factorsB.finalScore}) prioritised over low-demand expensive item (score ${factorsA.finalScore})`
   );
+
+  // =========================================================================
+  // Test Suite 13: Phase 6 Traffic Lab & Real Workload Trace Replay
+  // =========================================================================
+  console.log('\n--- Test Suite 13: Phase 6 Traffic Lab & Trace Replay ---');
+  await redisCache.flushall();
+  redisCache.resetCounters();
+
+  const replayTraceJson = JSON.stringify([
+    { timestamp: 1725450000000, request_id: 'REQ-REP-01', object_id: 'ReplayProduct_1', operation: 'GET', response_size: 2048, backend_latency: 50, regeneration_cost: 50, status_code: 200 },
+    { timestamp: 1725450001000, request_id: 'REQ-REP-02', object_id: 'ReplayProduct_1', operation: 'GET', response_size: 2048, backend_latency: 50, regeneration_cost: 50, status_code: 200 },
+    { timestamp: 1725450002000, request_id: 'REQ-REP-03', object_id: 'ReplayProduct_2', operation: 'GET', response_size: 4096, backend_latency: 80, regeneration_cost: 80, status_code: 200 },
+    { timestamp: 1725450003000, request_id: 'REQ-REP-04', object_id: 'ReplayProduct_1', operation: 'GET', response_size: 2048, backend_latency: 50, regeneration_cost: 50, status_code: 200 },
+    { timestamp: 1725450004000, request_id: 'REQ-REP-05', object_id: 'ReplayProduct_2', operation: 'GET', response_size: 4096, backend_latency: 80, regeneration_cost: 80, status_code: 200 },
+    { timestamp: 1725450005000, request_id: 'REQ-REP-06', object_id: 'ReplayProduct_3', operation: 'GET', response_size: 1024, backend_latency: 30, regeneration_cost: 30, status_code: 200 },
+  ]);
+
+  const replayIngest = await workloadIngestionService.ingestFile('benchmark_replay.json', replayTraceJson);
+  assert(replayIngest.summary.status === 'VALIDATED', '13.1 Trace file ingested for replay');
+
+  // Start Replay
+  const initialReplay = await replayRunner.startReplay({
+    workloadId: replayIngest.summary.workloadId,
+    requestsPerSecond: 100,
+    concurrency: 2,
+    speedMultiplier: 2.0,
+  });
+  assert(initialReplay.status === 'RUNNING', '13.2 Replay successfully transitioned to RUNNING state');
+
+  // Wait for asynchronous replay completion
+  while (replayRunner.isReplaying()) {
+    await new Promise(r => setTimeout(r, 50));
+  }
+
+  const completedReplay = replayRunner.getStatus()!;
+  assert(completedReplay.status === 'COMPLETED', `13.3 Replay transitioned to COMPLETED state (got ${completedReplay.status})`);
+  assert(completedReplay.totalRequestsInTrace === 6, '13.4 Total requests in trace recorded as 6');
+  assert(completedReplay.requestsCompleted === 6, '13.5 All 6 requests executed against cache engine');
+  assert(completedReplay.cacheHits + completedReplay.cacheMisses === 6, '13.6 Exact cache hits + misses equals total completed requests');
+  assert(completedReplay.cacheHits >= 2, `13.7 Subsequent queries for repeated keys yielded real cache hits (got ${completedReplay.cacheHits} hits)`);
+  assert(completedReplay.backendCalls >= 3, `13.8 Initial unique keys caused real backend lookups (got ${completedReplay.backendCalls} backend calls)`);
+  assert(completedReplay.avgLatencyMs > 0, `13.9 Real latency tracked accurately (${completedReplay.avgLatencyMs}ms)`);
+
+  // =========================================================================
+  // Test Suite 14: Phase 7 Real Backend Protection & Concurrency Defense
+  // =========================================================================
+  console.log('\n--- Test Suite 14: Phase 7 Real Backend Protection ---');
+
+  // 14.1 Token Bucket Rate Limiter
+  rateLimiter.reset();
+  rateLimiter.setLimit(10, 5); // 10 RPS, burst capacity 5
+  assert(rateLimiter.tryAcquire(5) === true, '14.1a Consumed available burst tokens');
+  assert(rateLimiter.tryAcquire(1) === false, '14.1b Throttles excess incoming requests');
+  assert(rateLimiter.getStats().throttledRequests >= 1, '14.1c Throttled counter incremented');
+
+  // 14.2 Concurrency Control & Request Queue
+  requestQueue.reset();
+  requestQueue.setConfig(2, 5); // max concurrency 2, max queue depth 5
+
+  let activeTasks = 0;
+  const slowTask = async (id: number) => {
+    activeTasks++;
+    await new Promise(r => setTimeout(r, 60));
+    activeTasks--;
+    return `task_${id}_done`;
+  };
+
+  const p1 = requestQueue.enqueue(() => slowTask(1));
+  const p2 = requestQueue.enqueue(() => slowTask(2));
+  const p3 = requestQueue.enqueue(() => slowTask(3));
+
+  assert(requestQueue.getStats().activeRequests === 2, `14.2a In-flight concurrency capped at max (got ${requestQueue.getStats().activeRequests})`);
+  assert(requestQueue.getStats().waitingRequests === 1, `14.2b Third task queued in FIFO buffer (got ${requestQueue.getStats().waitingRequests})`);
+
+  const [qRes1, qRes2, qRes3] = await Promise.all([p1, p2, p3]);
+  assert(qRes1 === 'task_1_done' && qRes3 === 'task_3_done', '14.2c All queued tasks executed and resolved successfully');
+  assert(requestQueue.getStats().waitingRequests === 0, '14.2d Queue drained after completion');
+
+  // 14.3 Circuit Breaker Truth-Grounded States (CLOSED -> OPEN -> HALF-OPEN -> CLOSED)
+  circuitBreaker.reset();
+  circuitBreaker.setConfig(0.5, 200); // 50% threshold, 200ms recovery
+  assert(circuitBreaker.getState() === 'CLOSED', '14.3a Circuit Breaker is strictly CLOSED during healthy operation');
+  assert(circuitBreaker.canExecute() === true, '14.3b canExecute returns true when CLOSED');
+
+  // Record low error rate (1 failure, 4 successes = 20% < 50%)
+  circuitBreaker.recordResult(false);
+  circuitBreaker.recordResult(true);
+  circuitBreaker.recordResult(true);
+  circuitBreaker.recordResult(true);
+  circuitBreaker.recordResult(true);
+  assert(circuitBreaker.getState() === 'CLOSED', '14.3c Circuit Breaker does NOT open prematurely when error rate is below threshold');
+
+  // Inject failure surge to trip circuit
+  for (let i = 0; i < 6; i++) {
+    circuitBreaker.recordResult(false);
+  }
+  assert(circuitBreaker.getState() === 'OPEN', '14.3d Circuit Breaker entered OPEN state after error rate exceeded 50%');
+  assert(circuitBreaker.canExecute() === false, '14.3e canExecute returns false when OPEN');
+
+  // 14.4 Retry Controller Aborts when Circuit is OPEN
+  let retryAttempts = 0;
+  let retryFailedProperly = false;
+  try {
+    await retryController.executeWithRetry(async () => {
+      retryAttempts++;
+      throw new Error('Database connection failed');
+    });
+  } catch (err: any) {
+    retryFailedProperly = true;
+  }
+  assert(retryFailedProperly === true, '14.4a RetryController rejected when circuit is OPEN');
+  assert(retryAttempts === 0, '14.4b RetryController did NOT dispatch retry attempts while circuit is OPEN');
+
+  // Wait for recovery timeout to transition to HALF-OPEN
+  await new Promise(r => setTimeout(r, 250));
+  assert(circuitBreaker.getState() === 'HALF-OPEN', '14.3f Circuit Breaker transitioned to HALF-OPEN after recovery timer');
+
+  // Probe with successes to close
+  circuitBreaker.recordResult(true);
+  circuitBreaker.recordResult(true);
+  circuitBreaker.recordResult(true);
+  assert(circuitBreaker.getState() === 'CLOSED', '14.3g Circuit Breaker recovered back to CLOSED state');
+
+  // 14.5 Cache-First Protection (Stale-While-Error)
+  await redisCache.set('cache:obj:StaleKey_01', JSON.stringify({ name: 'Cached Object' }), {
+    objectId: 'StaleKey_01',
+    sizeBytes: 1024,
+    retrievalCostMs: 50,
+  });
+
+  // Trip Circuit Breaker again to simulate total backend outage
+  for (let i = 0; i < 6; i++) {
+    circuitBreaker.recordResult(false);
+  }
+  assert(circuitBreaker.getState() === 'OPEN', '14.5a Circuit Breaker tripped for backend outage test');
+
+  // Request cached item during outage -> should serve cached data with status 200
+  const staleResponse = await cacheService.handleRequest('StaleKey_01');
+  assert(staleResponse.cacheHit === true, '14.5b Cache-First defense served resident cached object during outage');
+  assert(staleResponse.statusCode === 200, '14.5c Response status is 200 OK');
+  assert(staleResponse.data.name === 'Cached Object', '14.5d Cached payload preserved and returned');
+
+  // Request uncached item during outage -> should short-circuit with 503
+  const uncachedResponse = await cacheService.handleRequest('Uncached_Outage_Item');
+  assert(uncachedResponse.statusCode === 503, '14.5e Uncached item gracefully returned 503 during outage');
+  assert(uncachedResponse.cacheHit === false, '14.5f Uncached item marked as cache miss');
+
+  // Reset circuit breaker after test
+  circuitBreaker.reset();
 
   console.log('\n========================================================');
   console.log(`  TEST RESULTS: ${passed} PASSED, ${failed} FAILED`);

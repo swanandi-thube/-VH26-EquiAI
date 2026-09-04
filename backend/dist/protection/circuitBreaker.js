@@ -118,6 +118,8 @@ class CircuitBreaker {
             rejectedCalls: this.rejectedCalls,
             errorRate,
             lastStateChange: this.lastStateChange,
+            lastFailureTime: this.lastFailureTime,
+            recoveryTimeMs: this.recoveryTimeMs,
             timeUntilHalfOpenMs: timeUntilHalfOpen,
         };
     }

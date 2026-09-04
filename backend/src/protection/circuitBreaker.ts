@@ -14,6 +14,8 @@ export interface CircuitBreakerStats {
   rejectedCalls: number;
   errorRate: number;
   lastStateChange: number;
+  lastFailureTime: number;
+  recoveryTimeMs: number;
   timeUntilHalfOpenMs: number;
 }
 
@@ -143,6 +145,8 @@ export class CircuitBreaker {
       rejectedCalls: this.rejectedCalls,
       errorRate,
       lastStateChange: this.lastStateChange,
+      lastFailureTime: this.lastFailureTime,
+      recoveryTimeMs: this.recoveryTimeMs,
       timeUntilHalfOpenMs: timeUntilHalfOpen,
     };
   }

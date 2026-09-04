@@ -217,7 +217,82 @@ export const ProtectionPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Module 3: Read Replicas & Connection Pool Architecture */}
+      {/* Module 3: Request Queue & Concurrency Limiter & Retry Controller */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Request Queue */}
+        <div className="bg-dark-900 border border-dark-750 rounded-xl p-5 shadow-sm space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-dark-750">
+            <div className="flex items-center gap-2">
+              <Server className="w-4 h-4 text-amber-400" />
+              <span className="text-xs font-bold uppercase tracking-wider text-stone-200">
+                Backend Concurrency & Request Queue
+              </span>
+            </div>
+            <span className="text-[10px] font-mono text-stone-400">
+              In-Flight: {stats?.queue?.activeRequests ?? 0} / {stats?.queue?.maxConcurrency ?? 50}
+            </span>
+          </div>
+
+          <p className="text-xs text-stone-300 leading-relaxed">
+            Limits concurrent backend connections to prevent overwhelming the database during traffic bursts. Excess requests enter a bounded FIFO queue.
+          </p>
+
+          <div className="grid grid-cols-4 gap-2 pt-2 font-mono text-center">
+            <div className="bg-dark-850 p-2.5 rounded-xl border border-dark-750">
+              <div className="text-stone-400 text-[10px] uppercase">Queue Depth</div>
+              <div className="text-lg font-bold text-amber-400 mt-0.5">{stats?.queue?.queueDepth ?? 0}</div>
+            </div>
+            <div className="bg-dark-850 p-2.5 rounded-xl border border-dark-750">
+              <div className="text-stone-400 text-[10px] uppercase">Active In-Flight</div>
+              <div className="text-lg font-bold text-stone-100 mt-0.5">{stats?.queue?.activeRequests ?? 0}</div>
+            </div>
+            <div className="bg-dark-850 p-2.5 rounded-xl border border-dark-750">
+              <div className="text-stone-400 text-[10px] uppercase">Avg Wait</div>
+              <div className="text-lg font-bold text-orange-400 mt-0.5">{stats?.queue?.averageWaitTimeMs ?? 0}ms</div>
+            </div>
+            <div className="bg-dark-850 p-2.5 rounded-xl border border-dark-750">
+              <div className="text-stone-400 text-[10px] uppercase">Rejected</div>
+              <div className="text-lg font-bold text-brand-rose mt-0.5">{stats?.queue?.rejectedRequests ?? 0}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Retry Controller */}
+        <div className="bg-dark-900 border border-dark-750 rounded-xl p-5 shadow-sm space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-dark-750">
+            <div className="flex items-center gap-2">
+              <RotateCcw className="w-4 h-4 text-orange-400" />
+              <span className="text-xs font-bold uppercase tracking-wider text-stone-200">
+                Jittered Exponential Retry Controller
+              </span>
+            </div>
+            <span className="text-[10px] font-mono text-stone-400">
+              Max Retries: {stats?.retry?.maxRetries ?? 3}
+            </span>
+          </div>
+
+          <p className="text-xs text-stone-300 leading-relaxed">
+            Automatically recovers from transient network glitches using exponential backoff with randomized jitter. Halts retries immediately if Circuit Breaker trips OPEN.
+          </p>
+
+          <div className="grid grid-cols-3 gap-3 pt-2 font-mono text-center">
+            <div className="bg-dark-850 p-3 rounded-xl border border-dark-750">
+              <div className="text-stone-400 text-[10px] uppercase">Total Retries</div>
+              <div className="text-xl font-bold text-stone-100 mt-1">{stats?.retry?.totalRetries ?? 0}</div>
+            </div>
+            <div className="bg-dark-850 p-3 rounded-xl border border-dark-750">
+              <div className="text-stone-400 text-[10px] uppercase">Recovered</div>
+              <div className="text-xl font-bold text-brand-emerald mt-1">{stats?.retry?.successfulRetries ?? 0}</div>
+            </div>
+            <div className="bg-dark-850 p-3 rounded-xl border border-dark-750">
+              <div className="text-stone-400 text-[10px] uppercase">Exhausted</div>
+              <div className="text-xl font-bold text-brand-rose mt-1">{stats?.retry?.exhaustedRetries ?? 0}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Module 4: Read Replicas & Connection Pool Architecture */}
       <div className="bg-dark-900 border border-dark-750 rounded-xl p-5 shadow-sm space-y-4">
         <div className="flex items-center justify-between pb-3 border-b border-dark-750">
           <div className="flex items-center gap-2">

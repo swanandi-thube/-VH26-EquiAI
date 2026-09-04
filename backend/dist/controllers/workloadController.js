@@ -1,10 +1,8 @@
 "use strict";
-/**
- * Workload & Traffic Lab Controller
- */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.workloadController = exports.WorkloadController = void 0;
 const generator_1 = require("../workload/generator");
+const replayRunner_1 = require("../workload/replayRunner");
 const workloadIngestionService_1 = require("../services/workloadIngestionService");
 const workloadRepository_1 = require("../repositories/workloadRepository");
 class WorkloadController {
@@ -158,6 +156,60 @@ class WorkloadController {
             data: {
                 isRunning: generator_1.workloadGenerator.isWorkloadRunning(),
                 activeRun: active,
+            },
+        });
+    }
+    /**
+     * POST /api/workloads/:id/replay
+     */
+    async replayWorkload(req, res) {
+        try {
+            const { id } = req.params;
+            const config = {
+                workloadId: id,
+                requestsPerSecond: req.body.requestsPerSecond || req.body.rps || 100,
+                concurrency: req.body.concurrency || 5,
+                cacheCapacityMb: req.body.cacheCapacityMb,
+                ttlSeconds: req.body.ttlSeconds || req.body.ttl,
+                burstTraffic: req.body.burstTraffic || false,
+                speedMultiplier: req.body.speedMultiplier || 1.0,
+            };
+            const metrics = await replayRunner_1.replayRunner.startReplay(config);
+            res.json({
+                success: true,
+                data: metrics,
+            });
+        }
+        catch (err) {
+            console.error('[WorkloadController] Replay start error:', err);
+            res.status(500).json({ success: false, message: err.message });
+        }
+    }
+    /**
+     * POST /api/workloads/replay/stop
+     */
+    async stopReplay(req, res) {
+        try {
+            const metrics = await replayRunner_1.replayRunner.stopReplay();
+            res.json({
+                success: true,
+                data: metrics,
+            });
+        }
+        catch (err) {
+            res.status(500).json({ success: false, message: err.message });
+        }
+    }
+    /**
+     * GET /api/workloads/replay/status
+     */
+    async getReplayStatus(req, res) {
+        const metrics = replayRunner_1.replayRunner.getStatus();
+        res.json({
+            success: true,
+            data: {
+                isReplaying: replayRunner_1.replayRunner.isReplaying(),
+                metrics,
             },
         });
     }

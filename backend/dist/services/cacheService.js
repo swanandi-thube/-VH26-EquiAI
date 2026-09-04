@@ -20,6 +20,8 @@ const client_1 = require("../database/client");
 const circuitBreaker_1 = require("../protection/circuitBreaker");
 const coalescing_1 = require("../protection/coalescing");
 const rateLimiter_1 = require("../protection/rateLimiter");
+const requestQueue_1 = require("../protection/requestQueue");
+const retryController_1 = require("../protection/retryController");
 class CacheService {
     originAdapter;
     constructor(originAdapter = originAdapter_1.defaultOriginAdapter) {
@@ -156,8 +158,32 @@ class CacheService {
         // =========================================================================
         // CACHE MISS PATH
         // =========================================================================
-        // 4. Check Circuit Breaker before calling origin
+        // 4. Check Circuit Breaker & Cache-First Protection before calling origin
         if (!circuitBreaker_1.circuitBreaker.canExecute()) {
+            // Stale-While-Error Cache-First Defense
+            if (cacheResult.value !== null) {
+                let parsedData;
+                try {
+                    parsedData = JSON.parse(cacheResult.value);
+                }
+                catch {
+                    parsedData = cacheResult.value;
+                }
+                const totalLatencyMs = Math.max(1, Date.now() - startTotalTime);
+                return {
+                    requestId,
+                    objectId,
+                    cacheHit: true,
+                    backendCalled: false,
+                    cacheLatencyMs,
+                    backendLatencyMs: 0,
+                    totalLatencyMs,
+                    statusCode: 200,
+                    data: parsedData,
+                    responseSizeBytes: cacheResult.metadata?.sizeBytes || 0,
+                    metadata: cacheResult.metadata,
+                };
+            }
             const totalLatencyMs = Date.now() - startTotalTime;
             const log = {
                 requestId,
@@ -195,13 +221,37 @@ class CacheService {
                 errorMessage: 'Service Unavailable (Circuit Breaker OPEN)',
             };
         }
-        // 5. Fetch from Origin with Singleflight Coalescing
-        const { result: originResult, wasCoalesced } = await coalescing_1.coalescer.execute(cacheKey, async () => {
-            return await this.originAdapter.fetchObject(objectId, {
-                simulatedLatencyMs: options?.simulatedLatencyMs,
-                simulatedErrorRate: options?.simulatedErrorRate,
+        // 5. Fetch from Origin with Singleflight Coalescing, Request Queue & Retry Control
+        let originResult;
+        let wasCoalesced = false;
+        try {
+            const coalRes = await coalescing_1.coalescer.execute(cacheKey, async () => {
+                return await requestQueue_1.requestQueue.enqueue(async () => {
+                    return await retryController_1.retryController.executeWithRetry(async () => {
+                        const fetchRes = await this.originAdapter.fetchObject(objectId, {
+                            simulatedLatencyMs: options?.simulatedLatencyMs,
+                            simulatedErrorRate: options?.simulatedErrorRate,
+                        });
+                        if (fetchRes.statusCode >= 500) {
+                            throw new Error(`Origin backend error: HTTP ${fetchRes.statusCode}`);
+                        }
+                        return fetchRes;
+                    });
+                });
             });
-        });
+            originResult = coalRes.result;
+            wasCoalesced = coalRes.wasCoalesced;
+        }
+        catch (err) {
+            originResult = {
+                objectId,
+                data: null,
+                sizeBytes: 0,
+                retrievalCostMs: options?.simulatedLatencyMs || 50,
+                statusCode: err.message?.includes('404') ? 404 : 503,
+                errorMessage: err.message || 'Origin fetch failed',
+            };
+        }
         const isSuccess = originResult.statusCode === 200 && originResult.data !== null;
         circuitBreaker_1.circuitBreaker.recordResult(isSuccess);
         const totalLatencyMs = Date.now() - startTotalTime;

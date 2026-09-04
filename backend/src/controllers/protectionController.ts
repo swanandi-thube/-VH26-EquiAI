@@ -6,6 +6,8 @@ import { Request, Response } from 'express';
 import { coalescer } from '../protection/coalescing';
 import { circuitBreaker } from '../protection/circuitBreaker';
 import { rateLimiter } from '../protection/rateLimiter';
+import { requestQueue } from '../protection/requestQueue';
+import { retryController } from '../protection/retryController';
 import { dbClient } from '../database/client';
 import { poolMonitor } from '../protection/connectionPool';
 
@@ -17,6 +19,8 @@ export class ProtectionController {
         coalescing: coalescer.getStats(),
         circuitBreaker: circuitBreaker.getStats(),
         rateLimiter: rateLimiter.getStats(),
+        queue: requestQueue.getStats(),
+        retry: retryController.getStats(),
         pool: dbClient.getMetrics(),
         replicas: poolMonitor.getReplicas(),
       },
@@ -27,6 +31,8 @@ export class ProtectionController {
     coalescer.resetCounters();
     circuitBreaker.reset();
     rateLimiter.reset();
+    requestQueue.reset();
+    retryController.reset();
     res.json({
       success: true,
       message: 'Backend protection metrics reset',
