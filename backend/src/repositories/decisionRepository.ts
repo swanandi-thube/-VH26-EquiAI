@@ -120,6 +120,27 @@ export class DecisionRepository {
 
     return this.fallbackDecisions.find(d => d.id === id) || null;
   }
+
+  /**
+   * Clears ONLY demo lifecycle decisions, leaving live data completely untouched.
+   */
+  public async clearDemoDecisions(): Promise<number> {
+    const beforeCount = this.fallbackDecisions.length;
+    this.fallbackDecisions = this.fallbackDecisions.filter(d =>
+      d.source !== 'demo' && !d.reason.startsWith('[DEMO]') && !d.objectId.startsWith('DEMO-')
+    );
+    const deletedCount = beforeCount - this.fallbackDecisions.length;
+
+    if (dbClient.isConnected) {
+      try {
+        await dbClient.query(`DELETE FROM cache_decisions WHERE reason LIKE '[DEMO]%' OR object_id LIKE 'DEMO-%'`);
+      } catch (err: any) {
+        console.warn(`[DecisionRepo] DB clearDemoDecisions error:`, err.message);
+      }
+    }
+
+    return deletedCount;
+  }
 }
 
 export const decisionRepository = new DecisionRepository();

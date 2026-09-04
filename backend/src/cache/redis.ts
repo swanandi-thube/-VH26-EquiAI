@@ -429,16 +429,50 @@ export class RedisCacheService {
     this.refreshes++;
   }
 
-  public getAllObjects(): CacheObjectMetadata[] {
+  public getAllObjects(filterPrefix?: string): CacheObjectMetadata[] {
     const now = Date.now();
     const list: CacheObjectMetadata[] = [];
-    for (const entry of this.fallbackStore.values()) {
+    for (const [key, entry] of this.fallbackStore.entries()) {
+      if (filterPrefix && !key.startsWith(filterPrefix) && !(entry.metadata.key && entry.metadata.key.startsWith(filterPrefix))) {
+        continue;
+      }
       if (entry.expiresAt) {
         entry.metadata.remainingTtlSeconds = Math.max(0, Math.round((entry.expiresAt - now) / 1000));
       }
       list.push({ ...entry.metadata });
     }
     return list.sort((a, b) => b.lastAccessed - a.lastAccessed);
+  }
+
+  /**
+   * Clears ONLY demo keys (adaptivecache:demo:*), preserving all live cache data.
+   */
+  public async clearDemoKeys(): Promise<number> {
+    let deletedCount = 0;
+
+    // 1. Delete demo keys from live Redis if connected
+    if (this.isConnected && this.redisClient) {
+      try {
+        const demoKeys = await this.redisClient.keys('adaptivecache:demo:*');
+        if (demoKeys.length > 0) {
+          await this.redisClient.del(...demoKeys);
+          deletedCount += demoKeys.length;
+        }
+      } catch (err: any) {
+        console.warn(`[Redis] Live clearDemoKeys error: ${err.message}`);
+      }
+    }
+
+    // 2. Delete demo keys from fallback store
+    for (const [key, entry] of this.fallbackStore.entries()) {
+      if (key.startsWith('adaptivecache:demo:') || key.startsWith('cache:demo:') || entry.metadata.objectId.startsWith('DEMO-')) {
+        this.usedMemoryBytes = Math.max(0, this.usedMemoryBytes - entry.metadata.sizeBytes);
+        this.fallbackStore.delete(key);
+        deletedCount++;
+      }
+    }
+
+    return deletedCount;
   }
 
   public async dbsize(): Promise<number> {

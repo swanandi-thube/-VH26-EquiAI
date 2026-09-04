@@ -252,4 +252,40 @@ export const apiClient = {
     const json = await res.json();
     return json.data;
   },
+
+  // --- Demo Mode Endpoints ---
+  async startDemo(scenario: string = 'BASIC_CACHE', options?: { multiplier?: number; cacheCapacityBytes?: number; simulatedLatencyMs?: number; simulatedErrorRate?: number }): Promise<any> {
+    const res = await fetch(`${API_BASE}/demo/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scenario, ...options }),
+    });
+    const json = await res.json();
+    return json.data;
+  },
+
+  async stopDemo(): Promise<any> {
+    const res = await fetch(`${API_BASE}/demo/stop`, { method: 'POST' });
+    const json = await res.json();
+    return json;
+  },
+
+  async resetDemo(): Promise<any> {
+    const res = await fetch(`${API_BASE}/demo/reset`, { method: 'POST' });
+    const json = await res.json();
+    return json.data;
+  },
+
+  async getDemoStatus(): Promise<any> {
+    const res = await fetch(`${API_BASE}/demo/status`);
+    const json = await res.json();
+    return json.data;
+  },
+
+  async getDemoScenarios(): Promise<any[]> {
+    const res = await fetch(`${API_BASE}/demo/scenarios`);
+    const json = await res.json();
+    return json.data;
+  },
 };
+

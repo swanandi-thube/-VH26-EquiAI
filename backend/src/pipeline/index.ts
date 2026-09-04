@@ -28,11 +28,13 @@ export class RequestPipeline {
   public async processRequest(
     objectId: string,
     simulatedLatencyMs?: number,
-    simulatedErrorRate?: number
+    simulatedErrorRate?: number,
+    mode?: 'live' | 'demo'
   ): Promise<PipelineResult> {
     const res: CacheRequestResult = await cacheService.handleRequest(objectId, {
       simulatedLatencyMs,
       simulatedErrorRate,
+      mode,
     });
 
     return {
@@ -58,9 +60,10 @@ export class RequestPipeline {
   public async processProductRequest(
     objectId: string,
     simulatedLatencyMs?: number,
-    simulatedErrorRate?: number
+    simulatedErrorRate?: number,
+    mode?: 'live' | 'demo'
   ): Promise<PipelineResult> {
-    return this.processRequest(objectId, simulatedLatencyMs, simulatedErrorRate);
+    return this.processRequest(objectId, simulatedLatencyMs, simulatedErrorRate, mode);
   }
 }
 

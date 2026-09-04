@@ -34,12 +34,15 @@ class CacheService {
         this.originAdapter = adapter;
     }
     /**
-     * Core cache request execution flow
+     * Core cache request execution flow (supports both LIVE and DEMO mode)
      */
     async handleRequest(objectId, options) {
+        const isDemo = options?.mode === 'demo' || objectId.startsWith('DEMO-');
         const startTotalTime = Date.now();
-        const requestId = `REQ-${(0, uuid_1.v4)().substring(0, 8)}`;
-        const cacheKey = `cache:obj:${objectId}`;
+        const requestId = `${isDemo ? 'DEMO-REQ' : 'REQ'}-${(0, uuid_1.v4)().substring(0, 8)}`;
+        const cacheKey = isDemo ? `adaptivecache:demo:obj:${objectId}` : `cache:obj:${objectId}`;
+        const source = isDemo ? 'demo' : 'live';
+        const effectiveOriginAdapter = isDemo ? originAdapter_1.demoOriginAdapter : this.originAdapter;
         // 1. Rate Limiting Check (Token Bucket)
         if (!options?.bypassRateLimiter && !rateLimiter_1.rateLimiter.tryAcquire(1)) {
             const totalLatency = Date.now() - startTotalTime;
@@ -55,7 +58,9 @@ class CacheService {
                 cacheLatencyMs: 0,
                 totalLatencyMs: totalLatency,
                 statusCode: 429,
-                errorMessage: 'Rate limit exceeded (Token Bucket Throttled)',
+                errorMessage: `${isDemo ? '[DEMO] ' : ''}Rate limit exceeded (Token Bucket Throttled)`,
+                source,
+                mode: isDemo ? 'demo' : 'live',
             };
             await repositories_1.requestLogRepository.log(log);
             await repositories_1.eventRepository.log({
@@ -63,7 +68,9 @@ class CacheService {
                 timestamp: startTotalTime,
                 eventType: 'RATE-LIMIT',
                 objectId,
-                reason: 'Rate limit exceeded: incoming rate above configured RPS',
+                reason: `${isDemo ? '[DEMO] ' : ''}Rate limit exceeded: incoming rate above configured RPS`,
+                source,
+                mode: isDemo ? 'demo' : 'live',
             });
             return {
                 requestId,
@@ -125,7 +132,7 @@ class CacheService {
                 redis_1.redisCache.incrementRefresh();
                 this.triggerBackgroundRefresh(objectId, cacheKey);
             }
-            // Record Request Log for HIT
+            // Record Request Log and Event for HIT
             const log = {
                 requestId,
                 timestamp: startTotalTime,
@@ -139,8 +146,20 @@ class CacheService {
                 totalLatencyMs,
                 statusCode: 200,
                 wasCoalesced: false,
+                source,
+                mode: isDemo ? 'demo' : 'live',
             };
             await repositories_1.requestLogRepository.log(log);
+            await repositories_1.eventRepository.log({
+                id: `EVT-${(0, uuid_1.v4)().substring(0, 8)}`,
+                timestamp: now,
+                eventType: 'CACHE-HIT',
+                objectId,
+                score: meta.adaptiveScore,
+                reason: `${isDemo ? '[DEMO] ' : ''}CACHE HIT: Served from Redis in ${cacheLatencyMs}ms (Remaining TTL: ${meta.remainingTtlSeconds}s)`,
+                source,
+                mode: isDemo ? 'demo' : 'live',
+            });
             return {
                 requestId,
                 objectId,
@@ -197,7 +216,9 @@ class CacheService {
                 cacheLatencyMs,
                 totalLatencyMs,
                 statusCode: 503,
-                errorMessage: 'Circuit Breaker is OPEN. Backend protection short-circuited request.',
+                errorMessage: `${isDemo ? '[DEMO] ' : ''}Circuit Breaker is OPEN. Backend protection short-circuited request.`,
+                source,
+                mode: isDemo ? 'demo' : 'live',
             };
             await repositories_1.requestLogRepository.log(log);
             await repositories_1.eventRepository.log({
@@ -205,7 +226,9 @@ class CacheService {
                 timestamp: startTotalTime,
                 eventType: 'CIRCUIT-BREAKER',
                 objectId,
-                reason: 'Circuit Breaker OPEN: request short-circuited to protect degraded backend',
+                reason: `${isDemo ? '[DEMO] ' : ''}Circuit Breaker OPEN: request short-circuited to protect degraded backend`,
+                source,
+                mode: isDemo ? 'demo' : 'live',
             });
             return {
                 requestId,
@@ -228,7 +251,7 @@ class CacheService {
             const coalRes = await coalescing_1.coalescer.execute(cacheKey, async () => {
                 return await requestQueue_1.requestQueue.enqueue(async () => {
                     return await retryController_1.retryController.executeWithRetry(async () => {
-                        const fetchRes = await this.originAdapter.fetchObject(objectId, {
+                        const fetchRes = await effectiveOriginAdapter.fetchObject(objectId, {
                             simulatedLatencyMs: options?.simulatedLatencyMs,
                             simulatedErrorRate: options?.simulatedErrorRate,
                         });
@@ -271,6 +294,8 @@ class CacheService {
                 statusCode: originResult.statusCode,
                 errorMessage: originResult.errorMessage || 'Origin lookup failed',
                 wasCoalesced,
+                source,
+                mode: isDemo ? 'demo' : 'live',
             };
             await repositories_1.requestLogRepository.log(log);
             await repositories_1.eventRepository.log({
@@ -278,7 +303,9 @@ class CacheService {
                 timestamp: startTotalTime,
                 eventType: 'BACKEND-ERROR',
                 objectId,
-                reason: originResult.errorMessage || `Origin returned status code ${originResult.statusCode}`,
+                reason: `${isDemo ? '[DEMO] ' : ''}${originResult.errorMessage || `Origin returned status code ${originResult.statusCode}`}`,
+                source,
+                mode: isDemo ? 'demo' : 'live',
             });
             return {
                 requestId,
@@ -315,6 +342,13 @@ class CacheService {
             avgBackendLatencyMs: originResult.retrievalCostMs,
         });
         const evalResult = lifecycle_1.lifecycle.evaluate(candidateMeta, factors, settings, false);
+        if (evalResult.decisionRecord) {
+            evalResult.decisionRecord.source = source;
+            evalResult.decisionRecord.mode = isDemo ? 'demo' : 'live';
+            if (isDemo) {
+                evalResult.decisionRecord.reason = `[DEMO] ${evalResult.decisionRecord.reason}`;
+            }
+        }
         await repositories_1.decisionRepository.log(evalResult.decisionRecord);
         const now = Date.now();
         const fullMetadata = {
@@ -350,10 +384,12 @@ class CacheService {
                 eventType: 'PRE-CACHE',
                 objectId,
                 score: factors.finalScore,
-                reason: evalResult.reason,
+                reason: `${isDemo ? '[DEMO] ' : ''}${evalResult.reason}`,
+                source,
+                mode: isDemo ? 'demo' : 'live',
             });
         }
-        // 8. Store Request Log for MISS
+        // 8. Store Request Log and Event for MISS
         const log = {
             requestId,
             timestamp: startTotalTime,
@@ -367,8 +403,20 @@ class CacheService {
             totalLatencyMs,
             statusCode: 200,
             wasCoalesced,
+            source,
+            mode: isDemo ? 'demo' : 'live',
         };
         await repositories_1.requestLogRepository.log(log);
+        await repositories_1.eventRepository.log({
+            id: `EVT-${(0, uuid_1.v4)().substring(0, 8)}`,
+            timestamp: now,
+            eventType: 'CACHE-MISS',
+            objectId,
+            score: factors.finalScore,
+            reason: `${isDemo ? '[DEMO] ' : ''}CACHE MISS: Fetched from origin (${originResult.sourceType}) in ${originResult.retrievalCostMs}ms and cached with TTL ${evalResult.newTtlSeconds}s`,
+            source,
+            mode: isDemo ? 'demo' : 'live',
+        });
         return {
             requestId,
             objectId,

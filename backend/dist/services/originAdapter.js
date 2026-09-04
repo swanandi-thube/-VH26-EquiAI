@@ -4,9 +4,10 @@
  * Provides a clean abstraction for fetching data from the origin data store.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.defaultOriginAdapter = exports.DevOriginAdapter = exports.DatabaseOriginAdapter = void 0;
+exports.demoOriginAdapter = exports.defaultOriginAdapter = exports.DevOriginAdapter = exports.DemoOriginAdapter = exports.DatabaseOriginAdapter = void 0;
 const repositories_1 = require("../repositories");
 const client_1 = require("../database/client");
+const demoFixtures_1 = require("./demoFixtures");
 /**
  * Production Database Origin Adapter
  * Queries the real PostgreSQL / Supabase store for entities
@@ -71,6 +72,70 @@ class DatabaseOriginAdapter {
 }
 exports.DatabaseOriginAdapter = DatabaseOriginAdapter;
 /**
+ * Deterministic Demo Origin Data Source Adapter
+ * Provides strict test fixtures with fixed object IDs, prices, demands, sizes, and retrieval costs.
+ */
+class DemoOriginAdapter {
+    async fetchObject(objectId, options) {
+        const startTime = Date.now();
+        // Check simulated error rate if injected by degradation scenario
+        const errRate = options?.simulatedErrorRate ?? 0;
+        if (errRate > 0 && ((Date.now() + objectId.length) % 100) < (errRate * 100)) {
+            const delay = options?.simulatedLatencyMs || 300;
+            await new Promise(r => setTimeout(r, delay));
+            return {
+                objectId,
+                data: null,
+                sizeBytes: 0,
+                retrievalCostMs: Date.now() - startTime,
+                statusCode: 503,
+                sourceType: 'DEMO_SOURCE',
+                errorMessage: 'Demo origin data source returned simulated 503 error',
+            };
+        }
+        const fixture = demoFixtures_1.DEMO_FIXTURES[objectId];
+        const simulatedDelay = options?.simulatedLatencyMs !== undefined && options.simulatedLatencyMs > 0
+            ? options.simulatedLatencyMs
+            : (fixture ? fixture.retrievalCostMs : 20);
+        if (simulatedDelay > 0) {
+            await new Promise(r => setTimeout(r, simulatedDelay));
+        }
+        const elapsed = Date.now() - startTime;
+        if (!fixture) {
+            return {
+                objectId,
+                data: null,
+                sizeBytes: 0,
+                retrievalCostMs: elapsed,
+                statusCode: 404,
+                sourceType: 'DEMO_SOURCE',
+                errorMessage: `Demo fixture with objectId "${objectId}" not found`,
+            };
+        }
+        const payload = {
+            id: fixture.objectId,
+            name: fixture.name,
+            category: fixture.category,
+            price: fixture.price,
+            demand: fixture.demand,
+            description: fixture.description,
+            source: 'demo',
+            retrievalCostMs: fixture.retrievalCostMs,
+            sizeBytes: fixture.sizeBytes,
+            createdAt: Date.now(),
+        };
+        return {
+            objectId,
+            data: payload,
+            sizeBytes: fixture.sizeBytes,
+            retrievalCostMs: elapsed,
+            statusCode: 200,
+            sourceType: 'DEMO_SOURCE',
+        };
+    }
+}
+exports.DemoOriginAdapter = DemoOriginAdapter;
+/**
  * Development Adapter (clearly separated for testing when DB is offline)
  */
 class DevOriginAdapter {
@@ -96,3 +161,4 @@ class DevOriginAdapter {
 }
 exports.DevOriginAdapter = DevOriginAdapter;
 exports.defaultOriginAdapter = new DatabaseOriginAdapter();
+exports.demoOriginAdapter = new DemoOriginAdapter();

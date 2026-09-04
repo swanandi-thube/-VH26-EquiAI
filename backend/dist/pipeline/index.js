@@ -10,10 +10,11 @@ class RequestPipeline {
     /**
      * Process generic object request through the real cache request flow
      */
-    async processRequest(objectId, simulatedLatencyMs, simulatedErrorRate) {
+    async processRequest(objectId, simulatedLatencyMs, simulatedErrorRate, mode) {
         const res = await cacheService_1.cacheService.handleRequest(objectId, {
             simulatedLatencyMs,
             simulatedErrorRate,
+            mode,
         });
         return {
             requestId: res.requestId,
@@ -34,8 +35,8 @@ class RequestPipeline {
     /**
      * Backward-compatible alias
      */
-    async processProductRequest(objectId, simulatedLatencyMs, simulatedErrorRate) {
-        return this.processRequest(objectId, simulatedLatencyMs, simulatedErrorRate);
+    async processProductRequest(objectId, simulatedLatencyMs, simulatedErrorRate, mode) {
+        return this.processRequest(objectId, simulatedLatencyMs, simulatedErrorRate, mode);
     }
 }
 exports.RequestPipeline = RequestPipeline;

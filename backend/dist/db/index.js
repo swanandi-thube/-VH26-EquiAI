@@ -354,6 +354,31 @@ class DatabaseService {
             message: 'DATABASE_URL not configured. Operating in in-memory relational store mode.',
         };
     }
+    /**
+     * Clears ONLY demo data (request logs, events, decisions) leaving live data untouched.
+     */
+    async clearDemoData() {
+        const logsBefore = this.requestLogs.length;
+        this.requestLogs = this.requestLogs.filter(l => l.source !== 'demo' && !l.objectId.startsWith('DEMO-'));
+        const clearedLogs = logsBefore - this.requestLogs.length;
+        const eventsBefore = this.events.length;
+        this.events = this.events.filter(e => e.source !== 'demo' && !e.reason.startsWith('[DEMO]') && (!e.objectId || !e.objectId.startsWith('DEMO-')));
+        const clearedEvents = eventsBefore - this.events.length;
+        const decisionsBefore = this.decisions.length;
+        this.decisions = this.decisions.filter(d => d.source !== 'demo' && !d.reason.startsWith('[DEMO]') && !d.objectId.startsWith('DEMO-'));
+        const clearedDecisions = decisionsBefore - this.decisions.length;
+        if (this.isPostgresConnected && this.pgPool) {
+            try {
+                await this.pgPool.query(`DELETE FROM request_logs WHERE object_id LIKE 'DEMO-%'`);
+                await this.pgPool.query(`DELETE FROM system_events WHERE reason LIKE '[DEMO]%' OR object_id LIKE 'DEMO-%'`);
+                await this.pgPool.query(`DELETE FROM cache_decisions WHERE reason LIKE '[DEMO]%' OR object_id LIKE 'DEMO-%'`);
+            }
+            catch (err) {
+                console.warn(`[DatabaseService] PG clearDemoData error:`, err.message);
+            }
+        }
+        return { clearedLogs, clearedEvents, clearedDecisions };
+    }
     sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }

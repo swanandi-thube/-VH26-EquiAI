@@ -77,6 +77,12 @@ exports.apiRouter.post('/scenarios/run', (req, res) => controllers_1.whatIfContr
 exports.apiRouter.post('/scenarios/apply', (req, res) => controllers_1.whatIfController.applyScenario(req, res));
 // --- Cost & ROI Infrastructure Model ---
 exports.apiRouter.get('/cost', (req, res) => controllers_1.costController.getCost(req, res));
+// --- Demo Mode & Test Harness Isolation ---
+exports.apiRouter.post('/demo/start', (req, res) => controllers_1.demoController.start(req, res));
+exports.apiRouter.post('/demo/stop', (req, res) => controllers_1.demoController.stop(req, res));
+exports.apiRouter.post('/demo/reset', (req, res) => controllers_1.demoController.reset(req, res));
+exports.apiRouter.get('/demo/status', (req, res) => controllers_1.demoController.getStatus(req, res));
+exports.apiRouter.get('/demo/scenarios', (req, res) => controllers_1.demoController.getScenarios(req, res));
 // --- System Configuration & Policies ---
 exports.apiRouter.get('/settings', (req, res) => controllers_1.settingsController.getSettings(req, res));
 exports.apiRouter.put('/settings', (req, res) => controllers_1.settingsController.updateSettings(req, res));

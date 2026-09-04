@@ -9,7 +9,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { redisCache } from '../cache/redis';
-import { IOriginDataSource, defaultOriginAdapter } from './originAdapter';
+import { IOriginDataSource, defaultOriginAdapter, demoOriginAdapter } from './originAdapter';
 import {
   requestLogRepository,
   decisionRepository,
@@ -58,7 +58,7 @@ export class CacheService {
   }
 
   /**
-   * Core cache request execution flow
+   * Core cache request execution flow (supports both LIVE and DEMO mode)
    */
   public async handleRequest(
     objectId: string,
@@ -66,11 +66,15 @@ export class CacheService {
       simulatedLatencyMs?: number;
       simulatedErrorRate?: number;
       bypassRateLimiter?: boolean;
+      mode?: 'live' | 'demo';
     }
   ): Promise<CacheRequestResult> {
+    const isDemo = options?.mode === 'demo' || objectId.startsWith('DEMO-');
     const startTotalTime = Date.now();
-    const requestId = `REQ-${uuidv4().substring(0, 8)}`;
-    const cacheKey = `cache:obj:${objectId}`;
+    const requestId = `${isDemo ? 'DEMO-REQ' : 'REQ'}-${uuidv4().substring(0, 8)}`;
+    const cacheKey = isDemo ? `adaptivecache:demo:obj:${objectId}` : `cache:obj:${objectId}`;
+    const source = isDemo ? 'demo' : 'live';
+    const effectiveOriginAdapter = isDemo ? demoOriginAdapter : this.originAdapter;
 
     // 1. Rate Limiting Check (Token Bucket)
     if (!options?.bypassRateLimiter && !rateLimiter.tryAcquire(1)) {
@@ -87,7 +91,9 @@ export class CacheService {
         cacheLatencyMs: 0,
         totalLatencyMs: totalLatency,
         statusCode: 429,
-        errorMessage: 'Rate limit exceeded (Token Bucket Throttled)',
+        errorMessage: `${isDemo ? '[DEMO] ' : ''}Rate limit exceeded (Token Bucket Throttled)`,
+        source,
+        mode: isDemo ? 'demo' : 'live',
       };
       await requestLogRepository.log(log);
       await eventRepository.log({
@@ -95,7 +101,9 @@ export class CacheService {
         timestamp: startTotalTime,
         eventType: 'RATE-LIMIT',
         objectId,
-        reason: 'Rate limit exceeded: incoming rate above configured RPS',
+        reason: `${isDemo ? '[DEMO] ' : ''}Rate limit exceeded: incoming rate above configured RPS`,
+        source,
+        mode: isDemo ? 'demo' : 'live',
       });
 
       return {
@@ -167,7 +175,7 @@ export class CacheService {
         this.triggerBackgroundRefresh(objectId, cacheKey);
       }
 
-      // Record Request Log for HIT
+      // Record Request Log and Event for HIT
       const log: RequestLog = {
         requestId,
         timestamp: startTotalTime,
@@ -181,8 +189,21 @@ export class CacheService {
         totalLatencyMs,
         statusCode: 200,
         wasCoalesced: false,
+        source,
+        mode: isDemo ? 'demo' : 'live',
       };
       await requestLogRepository.log(log);
+
+      await eventRepository.log({
+        id: `EVT-${uuidv4().substring(0, 8)}`,
+        timestamp: now,
+        eventType: 'CACHE-HIT',
+        objectId,
+        score: meta.adaptiveScore,
+        reason: `${isDemo ? '[DEMO] ' : ''}CACHE HIT: Served from Redis in ${cacheLatencyMs}ms (Remaining TTL: ${meta.remainingTtlSeconds}s)`,
+        source,
+        mode: isDemo ? 'demo' : 'live',
+      });
 
       return {
         requestId,
@@ -237,7 +258,9 @@ export class CacheService {
         cacheLatencyMs,
         totalLatencyMs,
         statusCode: 503,
-        errorMessage: 'Circuit Breaker is OPEN. Backend protection short-circuited request.',
+        errorMessage: `${isDemo ? '[DEMO] ' : ''}Circuit Breaker is OPEN. Backend protection short-circuited request.`,
+        source,
+        mode: isDemo ? 'demo' : 'live',
       };
       await requestLogRepository.log(log);
       await eventRepository.log({
@@ -245,7 +268,9 @@ export class CacheService {
         timestamp: startTotalTime,
         eventType: 'CIRCUIT-BREAKER',
         objectId,
-        reason: 'Circuit Breaker OPEN: request short-circuited to protect degraded backend',
+        reason: `${isDemo ? '[DEMO] ' : ''}Circuit Breaker OPEN: request short-circuited to protect degraded backend`,
+        source,
+        mode: isDemo ? 'demo' : 'live',
       });
 
       return {
@@ -271,7 +296,7 @@ export class CacheService {
       const coalRes = await coalescer.execute(cacheKey, async () => {
         return await requestQueue.enqueue(async () => {
           return await retryController.executeWithRetry(async () => {
-            const fetchRes = await this.originAdapter.fetchObject(objectId, {
+            const fetchRes = await effectiveOriginAdapter.fetchObject(objectId, {
               simulatedLatencyMs: options?.simulatedLatencyMs,
               simulatedErrorRate: options?.simulatedErrorRate,
             });
@@ -316,6 +341,8 @@ export class CacheService {
         statusCode: originResult.statusCode,
         errorMessage: originResult.errorMessage || 'Origin lookup failed',
         wasCoalesced,
+        source,
+        mode: isDemo ? 'demo' : 'live',
       };
       await requestLogRepository.log(log);
       await eventRepository.log({
@@ -323,7 +350,9 @@ export class CacheService {
         timestamp: startTotalTime,
         eventType: 'BACKEND-ERROR',
         objectId,
-        reason: originResult.errorMessage || `Origin returned status code ${originResult.statusCode}`,
+        reason: `${isDemo ? '[DEMO] ' : ''}${originResult.errorMessage || `Origin returned status code ${originResult.statusCode}`}`,
+        source,
+        mode: isDemo ? 'demo' : 'live',
       });
 
       return {
@@ -365,6 +394,13 @@ export class CacheService {
     });
 
     const evalResult = lifecycle.evaluate(candidateMeta as any, factors, settings, false);
+    if (evalResult.decisionRecord) {
+      evalResult.decisionRecord.source = source;
+      evalResult.decisionRecord.mode = isDemo ? 'demo' : 'live';
+      if (isDemo) {
+        evalResult.decisionRecord.reason = `[DEMO] ${evalResult.decisionRecord.reason}`;
+      }
+    }
     await decisionRepository.log(evalResult.decisionRecord);
 
     const now = Date.now();
@@ -408,11 +444,13 @@ export class CacheService {
         eventType: 'PRE-CACHE',
         objectId,
         score: factors.finalScore,
-        reason: evalResult.reason,
+        reason: `${isDemo ? '[DEMO] ' : ''}${evalResult.reason}`,
+        source,
+        mode: isDemo ? 'demo' : 'live',
       });
     }
 
-    // 8. Store Request Log for MISS
+    // 8. Store Request Log and Event for MISS
     const log: RequestLog = {
       requestId,
       timestamp: startTotalTime,
@@ -426,8 +464,21 @@ export class CacheService {
       totalLatencyMs,
       statusCode: 200,
       wasCoalesced,
+      source,
+      mode: isDemo ? 'demo' : 'live',
     };
     await requestLogRepository.log(log);
+
+    await eventRepository.log({
+      id: `EVT-${uuidv4().substring(0, 8)}`,
+      timestamp: now,
+      eventType: 'CACHE-MISS',
+      objectId,
+      score: factors.finalScore,
+      reason: `${isDemo ? '[DEMO] ' : ''}CACHE MISS: Fetched from origin (${originResult.sourceType}) in ${originResult.retrievalCostMs}ms and cached with TTL ${evalResult.newTtlSeconds}s`,
+      source,
+      mode: isDemo ? 'demo' : 'live',
+    });
 
     return {
       requestId,

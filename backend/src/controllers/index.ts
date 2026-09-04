@@ -11,3 +11,5 @@ export * from './whatIfController';
 export * from './costController';
 export * from './protectionController';
 export * from './observationController';
+export * from './demoController';
+

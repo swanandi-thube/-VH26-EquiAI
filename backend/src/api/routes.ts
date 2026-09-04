@@ -14,6 +14,7 @@ import {
   costController,
   protectionController,
   observationController,
+  demoController,
 } from '../controllers';
 import { telemetry } from '../telemetry';
 import { requestLogRepository } from '../repositories';
@@ -97,6 +98,14 @@ apiRouter.post('/scenarios/apply', (req: Request, res: Response) => whatIfContro
 // --- Cost & ROI Infrastructure Model ---
 apiRouter.get('/cost', (req: Request, res: Response) => costController.getCost(req, res));
 
+// --- Demo Mode & Test Harness Isolation ---
+apiRouter.post('/demo/start', (req: Request, res: Response) => demoController.start(req, res));
+apiRouter.post('/demo/stop', (req: Request, res: Response) => demoController.stop(req, res));
+apiRouter.post('/demo/reset', (req: Request, res: Response) => demoController.reset(req, res));
+apiRouter.get('/demo/status', (req: Request, res: Response) => demoController.getStatus(req, res));
+apiRouter.get('/demo/scenarios', (req: Request, res: Response) => demoController.getScenarios(req, res));
+
 // --- System Configuration & Policies ---
 apiRouter.get('/settings', (req: Request, res: Response) => settingsController.getSettings(req, res));
 apiRouter.put('/settings', (req: Request, res: Response) => settingsController.updateSettings(req, res));
+

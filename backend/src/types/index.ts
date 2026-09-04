@@ -143,6 +143,8 @@ export interface DecisionRecord {
   reason: string;
   timestamp: number;
   createdAt?: number;
+  source?: string;
+  mode?: 'live' | 'demo';
 }
 
 export interface RequestLog {
@@ -160,6 +162,8 @@ export interface RequestLog {
   errorMessage?: string;
   wasCoalesced?: boolean;
   strategyUsed?: CacheStrategy;
+  source?: string;
+  mode?: 'live' | 'demo';
 }
 
 export interface SystemSettings {
@@ -229,6 +233,8 @@ export interface ActivityEvent {
   score?: number;
   reason: string;
   metadata?: Record<string, any>;
+  source?: string;
+  mode?: 'live' | 'demo';
 }
 
 export interface WorkloadConfig {

@@ -49,17 +49,25 @@ class RequestLogRepository {
         }
     }
     /**
-     * Get recent request logs
+     * Get recent request logs with optional mode filter
      */
-    async getRecent(limit = 100) {
+    async getRecent(limit = 100, modeFilter) {
         if (client_1.dbClient.isConnected) {
             try {
-                const res = await client_1.dbClient.query(`SELECT request_id, timestamp, object_id, operation, response_size_bytes,
-                  cache_hit, backend_called, backend_latency_ms, cache_latency_ms,
-                  total_latency_ms, status_code, error_message, was_coalesced, strategy_used
-           FROM request_logs
-           ORDER BY timestamp DESC
-           LIMIT $1`, [limit]);
+                let query = `SELECT request_id, timestamp, object_id, operation, response_size_bytes,
+                            cache_hit, backend_called, backend_latency_ms, cache_latency_ms,
+                            total_latency_ms, status_code, error_message, was_coalesced, strategy_used
+                     FROM request_logs`;
+                const params = [];
+                if (modeFilter === 'demo') {
+                    query += ` WHERE object_id LIKE 'DEMO-%'`;
+                }
+                else if (modeFilter === 'live') {
+                    query += ` WHERE object_id NOT LIKE 'DEMO-%'`;
+                }
+                query += ` ORDER BY timestamp DESC LIMIT $${params.length + 1}`;
+                params.push(limit);
+                const res = await client_1.dbClient.query(query, params);
                 return res.rows.map(row => ({
                     requestId: row.request_id,
                     timestamp: Number(row.timestamp),
@@ -75,13 +83,39 @@ class RequestLogRepository {
                     errorMessage: row.error_message,
                     wasCoalesced: row.was_coalesced,
                     strategyUsed: row.strategy_used,
+                    source: row.object_id.startsWith('DEMO-') ? 'demo' : 'live',
+                    mode: row.object_id.startsWith('DEMO-') ? 'demo' : 'live',
                 }));
             }
             catch (err) {
                 console.warn(`[RequestLogRepo] DB query error:`, err.message);
             }
         }
-        return this.fallbackLogs.slice(-limit).reverse();
+        let logs = this.fallbackLogs;
+        if (modeFilter === 'demo') {
+            logs = logs.filter(l => l.source === 'demo' || l.objectId.startsWith('DEMO-'));
+        }
+        else if (modeFilter === 'live') {
+            logs = logs.filter(l => l.source !== 'demo' && !l.objectId.startsWith('DEMO-'));
+        }
+        return logs.slice(-limit).reverse();
+    }
+    /**
+     * Clears ONLY demo request logs, leaving live data completely untouched.
+     */
+    async clearDemoLogs() {
+        const beforeCount = this.fallbackLogs.length;
+        this.fallbackLogs = this.fallbackLogs.filter(l => l.source !== 'demo' && !l.objectId.startsWith('DEMO-'));
+        const deletedCount = beforeCount - this.fallbackLogs.length;
+        if (client_1.dbClient.isConnected) {
+            try {
+                await client_1.dbClient.query(`DELETE FROM request_logs WHERE object_id LIKE 'DEMO-%'`);
+            }
+            catch (err) {
+                console.warn(`[RequestLogRepo] DB clearDemoLogs error:`, err.message);
+            }
+        }
+        return deletedCount;
     }
     getAll() {
         return this.fallbackLogs;

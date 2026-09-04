@@ -44,7 +44,7 @@ class TelemetryCollector {
     /**
      * Computes a fresh telemetry snapshot from real runtime state and request logs
      */
-    getSnapshot() {
+    getSnapshot(options) {
         const now = Date.now();
         const settings = db_1.db.getSettings();
         const cacheStats = redis_1.redisCache.getStats();
@@ -54,7 +54,13 @@ class TelemetryCollector {
         // Compute metrics over recent 60-second window
         const recentLogs = db_1.db.getRecentRequestLogs(2000);
         const windowMs = 60000;
-        const windowLogs = recentLogs.filter(l => (now - l.timestamp) <= windowMs);
+        let windowLogs = recentLogs.filter(l => (now - l.timestamp) <= windowMs);
+        if (options?.mode === 'demo') {
+            windowLogs = windowLogs.filter(l => l.source === 'demo' || l.objectId.startsWith('DEMO-'));
+        }
+        else if (options?.mode === 'live') {
+            windowLogs = windowLogs.filter(l => l.source !== 'demo' && !l.objectId.startsWith('DEMO-'));
+        }
         const totalRequests = windowLogs.length;
         const cacheHits = windowLogs.filter(l => l.cacheHit).length;
         const cacheMisses = totalRequests - cacheHits;

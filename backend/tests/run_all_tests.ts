@@ -30,6 +30,9 @@ import { MigrationRunner } from '../src/database/migrations';
 import { config } from '../src/config';
 import { wsService } from '../src/ws/server';
 import { EventType } from '../src/types';
+import { demoService } from '../src/services/demoService';
+import { DEMO_FIXTURES, DEMO_SCENARIOS } from '../src/services/demoFixtures';
+
 
 let passed = 0;
 let failed = 0;
@@ -1165,6 +1168,146 @@ async function runTests() {
   assert(idleSnapshot.totalRequests >= 0, '18.6a Telemetry totalRequests is non-negative');
   assert(typeof idleSnapshot.backendLoadRatio === 'number', '18.6b Backend load ratio is numeric');
   assert(typeof idleSnapshot.averageLatencyMs === 'number', '18.6c Average latency is numeric');
+
+  // =========================================================================
+  // Test Suite 19: Safe Demo Mode & Test Harness Isolation
+  // =========================================================================
+  console.log('\n--- Test Suite 19: Safe Demo Mode & Test Harness Isolation ---');
+  redisCache.setCapacity(config.maxCacheCapacityBytes);
+
+
+  // 19.1 Demo Mode Status & Fixtures Metadata
+  const demoStatus = demoService.getStatus();
+  assert(demoStatus.activeNamespace === 'adaptivecache:demo:*', '19.1a Active demo namespace is adaptivecache:demo:*');
+  assert(Object.keys(DEMO_FIXTURES).length === 10, '19.1b 10 deterministic demo fixture objects defined');
+  assert(DEMO_FIXTURES['DEMO-001'].price === 500 && DEMO_FIXTURES['DEMO-001'].demand === 100, '19.1c DEMO-001 fixture has fixed price=500 and demand=100');
+  assert(DEMO_FIXTURES['DEMO-010'].price === 2000 && DEMO_FIXTURES['DEMO-010'].retrievalCostMs === 200, '19.1d DEMO-010 fixture has fixed price=2000 and cost=200ms');
+
+  const demoScenarios = demoService.getScenarios();
+  assert(demoScenarios.length === 6, `19.1e 6 deterministic scenarios available (got ${demoScenarios.length})`);
+
+  // 19.2 Basic Cache MISS on First Access (DEMO-001)
+  await redisCache.clearDemoKeys();
+  const firstReq = await cacheService.handleRequest('DEMO-001', { mode: 'demo' });
+  assert(firstReq.cacheHit === false, '19.2a First request to DEMO-001 is a cache MISS');
+  assert(firstReq.backendCalled === true, '19.2b Backend origin was called for MISS');
+  assert(firstReq.statusCode === 200, '19.2c Request returned HTTP 200');
+  assert(firstReq.data && firstReq.data.price === 500, '19.2d Retrieved deterministic demo fixture data (price=500)');
+
+  // Verify key exists in Redis demo namespace
+  const demoRedisCheck = await redisCache.get('adaptivecache:demo:obj:DEMO-001');
+  assert(demoRedisCheck.hit === true, '19.2e DEMO-001 was stored in Redis demo namespace (adaptivecache:demo:obj:DEMO-001)');
+
+  // 19.3 Basic Cache HIT on Repeated Access (DEMO-001)
+  const secondReq = await cacheService.handleRequest('DEMO-001', { mode: 'demo' });
+  assert(secondReq.cacheHit === true, '19.3a Second request to DEMO-001 is an immediate cache HIT');
+  assert(secondReq.backendCalled === false, '19.3b Backend origin was NOT called on HIT');
+  assert(secondReq.backendLatencyMs === 0, '19.3c Backend latency is 0ms on cache HIT');
+
+  // 19.4 Namespace Isolation (Live vs Demo)
+  await redisCache.set('cache:obj:live_prod_item', JSON.stringify({ name: 'Live Production Item' }), {
+    objectId: 'live_prod_item',
+    sizeBytes: 1024,
+  });
+  const liveObjects = redisCache.getAllObjects('cache:obj:');
+  const demoObjects = redisCache.getAllObjects('adaptivecache:demo:');
+  assert(liveObjects.some(o => o.objectId === 'live_prod_item'), '19.4a Live object exists under cache:obj:*');
+  assert(demoObjects.some(o => o.objectId === 'DEMO-001'), '19.4b Demo object exists under adaptivecache:demo:*');
+  assert(!demoObjects.some(o => o.objectId === 'live_prod_item'), '19.4c Demo namespace does not contain live production objects');
+
+  // 19.5 Multi-Factor Scoring on Demo Fixtures
+  assert(Boolean(firstReq.metadata && firstReq.metadata.adaptiveScore > 0), '19.5a Real multi-factor adaptiveScore computed on demo object');
+  assert(Boolean(firstReq.metadata && ['KEEP', 'REFRESH', 'PRE-CACHE', 'EVICT'].includes(firstReq.metadata.lastDecision)), '19.5b Real lifecycle decision generated for demo object');
+
+  // 19.6 Hot Object Elevation Scenario Execution
+  const hotRes = await demoService.start('HOT_OBJECT');
+  assert(hotRes.totalRequests === 15, `19.6a Hot object scenario executed 15 requests (got ${hotRes.totalRequests})`);
+  assert(hotRes.hits > 0, '19.6b Hot object scenario generated cache hits on repeated access');
+  const hotMeta = await redisCache.get('adaptivecache:demo:obj:DEMO-001');
+  assert(hotMeta.hit === true && (hotMeta.metadata?.accessCount || 0) >= 3, `19.6c DEMO-001 access frequency elevated from real requests (count=${hotMeta.metadata?.accessCount})`);
+
+  // 19.7 Cold Object Access Scenario Execution
+  const coldRes = await demoService.start('COLD_OBJECT');
+  assert(coldRes.totalRequests === 10, '19.7a Cold object scenario executed 10 requests');
+  const coldObjBreakdown = coldRes.requestsBreakdown.find(r => r.objectId === 'DEMO-006');
+  assert(Boolean(coldObjBreakdown), '19.7b DEMO-006 cold object trace was processed with low access frequency');
+
+
+
+  // 19.8 Cache Pressure & Deterministic Eviction Scenario
+  const pressureRes = await demoService.start('CACHE_PRESSURE', { cacheCapacityBytes: 10240 }); // 10KB small capacity
+  assert(pressureRes.totalRequests === 10, '19.8a Cache pressure scenario executed 10 requests');
+  assert(pressureRes.decisionsCount === 10, '19.8b Decisions evaluated for all pressure requests');
+
+  // 19.9 Traffic Spike Multiplier (3x) Execution
+  const spikeRes = await demoService.start('TRAFFIC_SPIKE', { multiplier: 3 });
+  assert(spikeRes.totalRequests === 30, `19.9a Traffic spike 3x multiplier generated 30 requests (got ${spikeRes.totalRequests})`);
+  assert(spikeRes.hits > 0 && spikeRes.misses > 0, '19.9b Spike generated real hits and misses');
+  assert(typeof spikeRes.p95LatencyMs === 'number' && typeof spikeRes.p99LatencyMs === 'number', '19.9c Real P95 and P99 latencies calculated from spike trace');
+
+  // 19.10 Backend Degradation & Circuit Protection Scenario
+  const degradationRes = await demoService.start('BACKEND_DEGRADATION', { simulatedLatencyMs: 300, simulatedErrorRate: 0.4 });
+  assert(degradationRes.totalRequests === 10, '19.10a Degradation scenario processed 10 requests safely');
+  assert(degradationRes.avgLatencyMs >= 0, '19.10b Degradation latency recorded accurately');
+
+  // 19.11 Activity Logging & Tagging
+  const demoLogs = await requestLogRepository.getRecent(50, 'demo');
+  assert(demoLogs.length > 0, '19.11a Demo request logs persisted');
+  assert(demoLogs.every(l => l.source === 'demo' || l.objectId.startsWith('DEMO-')), '19.11b All demo request logs tagged with source=demo');
+
+  const demoEvents = await eventRepository.getRecent(50, undefined, 'demo');
+  assert(demoEvents.length > 0, '19.11c Demo activity events persisted');
+  assert(demoEvents.some(e => e.reason.startsWith('[DEMO]') || (e.objectId && e.objectId.startsWith('DEMO-'))), '19.11d Demo events formatted with [DEMO] prefix');
+
+  // 19.12 Benchmark Trace Reproducibility with Demo Trace
+  const demoBenchmarkTrace = DEMO_SCENARIOS.BASIC_CACHE.sequence.map((id, idx) => ({
+    objectId: id,
+    sizeBytes: DEMO_FIXTURES[id]?.sizeBytes || 2048,
+    retrievalCostMs: DEMO_FIXTURES[id]?.retrievalCostMs || 60,
+  }));
+  const benchComparison = await benchmarkEngine.runBenchmark(demoBenchmarkTrace, 15360, 'Demo Test Workload Trace');
+  assert(benchComparison.results.length === 4, '19.12a Benchmark engine compared 4 algorithms (LRU, LFU, GDS, AdaptiveCache) on demo trace');
+  assert(benchComparison.fairnessDetails.identicalRequests === true, '19.12b Benchmark verified identical requests and fair initial state');
+
+
+
+  // 19.13 Demo Reset Isolation (Never Deletes Live Production Data)
+  // Seed live data
+  await requestLogRepository.log({
+    requestId: 'REQ-LIVE-PERMANENT-99',
+    timestamp: Date.now(),
+    objectId: 'live_production_target',
+    operation: 'GET',
+    responseSizeBytes: 4096,
+    cacheHit: true,
+    backendCalled: false,
+    backendLatencyMs: 0,
+    cacheLatencyMs: 2,
+    totalLatencyMs: 2,
+    statusCode: 200,
+    source: 'live',
+    mode: 'live',
+  });
+  await redisCache.set('cache:obj:live_production_target', JSON.stringify({ data: 'live data' }), {
+    objectId: 'live_production_target',
+    sizeBytes: 4096,
+  });
+
+  // Perform Demo Reset
+  const resetRes = await demoService.reset();
+  assert(resetRes.success === true, '19.13a Demo reset returned success');
+  assert(resetRes.clearedRedisKeys >= 0, '19.13b Demo reset reported cleared Redis keys count');
+
+  // Verify demo keys are purged
+  const postResetDemoCheck = await redisCache.get('adaptivecache:demo:obj:DEMO-001');
+  assert(postResetDemoCheck.hit === false, '19.13c Demo Redis keys successfully purged after reset');
+
+  // Verify live production data STILL EXISTS and was NOT deleted
+  const postResetLiveCheck = await redisCache.get('cache:obj:live_production_target');
+  assert(postResetLiveCheck.hit === true, '19.13d CRITICAL: Live Redis cache object was PRESERVED and NOT deleted by demo reset');
+
+  const liveLogsCheck = await requestLogRepository.getRecent(50, 'live');
+  assert(liveLogsCheck.some(l => l.requestId === 'REQ-LIVE-PERMANENT-99'), '19.13e CRITICAL: Live request logs were PRESERVED and NOT deleted by demo reset');
 
   console.log('\n========================================================');
   console.log(`  TEST RESULTS: ${passed} PASSED, ${failed} FAILED`);

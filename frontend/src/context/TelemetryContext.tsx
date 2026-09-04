@@ -37,9 +37,14 @@ interface TelemetryContextType {
   activeWorkload: WorkloadRun | null;
   isWorkloadRunning: boolean;
   isDemoMode: boolean;
+  isDemoRunning: boolean;
+  activeDemoScenario: string | null;
   openExplainDrawer: (decisionId: string) => Promise<void>;
   closeExplainDrawer: () => void;
   setDemoMode: (enabled: boolean) => void;
+  startDemoScenario: (scenarioId?: string, options?: any) => Promise<any>;
+  stopDemoScenario: () => Promise<any>;
+  resetDemoData: () => Promise<any>;
   refreshHealth: () => Promise<void>;
   checkWorkloadStatus: () => Promise<void>;
 }
@@ -57,6 +62,8 @@ export const TelemetryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [activeWorkload, setActiveWorkload] = useState<WorkloadRun | null>(null);
   const [isWorkloadRunning, setIsWorkloadRunning] = useState<boolean>(false);
   const [isDemoMode, setIsDemoMode] = useState<boolean>(false);
+  const [isDemoRunning, setIsDemoRunning] = useState<boolean>(false);
+  const [activeDemoScenario, setActiveDemoScenario] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -189,6 +196,44 @@ export const TelemetryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     };
   }, []);
 
+  const startDemoScenario = async (scenarioId: string = 'BASIC_CACHE', options?: any) => {
+    setIsDemoMode(true);
+    setIsDemoRunning(true);
+    setActiveDemoScenario(scenarioId);
+    try {
+      const res = await apiClient.startDemo(scenarioId, options);
+      return res;
+    } catch (err) {
+      console.error('[TelemetryContext] Start demo error:', err);
+      throw err;
+    } finally {
+      setIsDemoRunning(false);
+    }
+  };
+
+  const stopDemoScenario = async () => {
+    try {
+      const res = await apiClient.stopDemo();
+      setIsDemoRunning(false);
+      return res;
+    } catch (err) {
+      console.error('[TelemetryContext] Stop demo error:', err);
+      throw err;
+    }
+  };
+
+  const resetDemoData = async () => {
+    try {
+      const res = await apiClient.resetDemo();
+      setActiveDemoScenario(null);
+      setIsDemoRunning(false);
+      return res;
+    } catch (err) {
+      console.error('[TelemetryContext] Reset demo error:', err);
+      throw err;
+    }
+  };
+
   return (
     <TelemetryContext.Provider
       value={{
@@ -202,9 +247,14 @@ export const TelemetryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         activeWorkload,
         isWorkloadRunning,
         isDemoMode,
+        isDemoRunning,
+        activeDemoScenario,
         openExplainDrawer,
         closeExplainDrawer,
         setDemoMode: setIsDemoMode,
+        startDemoScenario,
+        stopDemoScenario,
+        resetDemoData,
         refreshHealth,
         checkWorkloadStatus,
       }}

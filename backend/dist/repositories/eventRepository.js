@@ -51,23 +51,25 @@ class EventRepository {
         }
     }
     /**
-     * Get recent events with optional eventType filter
+     * Get recent events with optional eventType filter and mode filter
      */
-    async getRecent(limit = 100, typeFilter) {
+    async getRecent(limit = 100, typeFilter, modeFilter) {
         if (client_1.dbClient.isConnected) {
             try {
-                let query = 'SELECT id, timestamp, event_type, object_id, score, reason, metadata FROM system_events';
+                let query = 'SELECT id, timestamp, event_type, object_id, score, reason, metadata FROM system_events WHERE 1=1';
                 const params = [];
                 if (typeFilter && typeFilter !== 'ALL') {
-                    query += ' WHERE event_type = $1';
+                    query += ` AND event_type = $${params.length + 1}`;
                     params.push(typeFilter);
-                    query += ` ORDER BY timestamp DESC LIMIT $2`;
-                    params.push(limit);
                 }
-                else {
-                    query += ` ORDER BY timestamp DESC LIMIT $1`;
-                    params.push(limit);
+                if (modeFilter === 'demo') {
+                    query += ` AND (reason LIKE '[DEMO]%' OR object_id LIKE 'DEMO-%')`;
                 }
+                else if (modeFilter === 'live') {
+                    query += ` AND (reason NOT LIKE '[DEMO]%' AND (object_id IS NULL OR object_id NOT LIKE 'DEMO-%'))`;
+                }
+                query += ` ORDER BY timestamp DESC LIMIT $${params.length + 1}`;
+                params.push(limit);
                 const res = await client_1.dbClient.query(query, params);
                 return res.rows.map(row => ({
                     id: row.id,
@@ -77,6 +79,7 @@ class EventRepository {
                     score: row.score !== null ? parseFloat(row.score) : undefined,
                     reason: row.reason,
                     metadata: row.metadata ? (typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata) : undefined,
+                    source: (row.reason && row.reason.startsWith('[DEMO]')) || (row.object_id && row.object_id.startsWith('DEMO-')) ? 'demo' : 'live',
                 }));
             }
             catch (err) {
@@ -87,7 +90,30 @@ class EventRepository {
         if (typeFilter && typeFilter !== 'ALL') {
             filtered = filtered.filter(e => e.eventType === typeFilter);
         }
+        if (modeFilter === 'demo') {
+            filtered = filtered.filter(e => e.source === 'demo' || e.reason.startsWith('[DEMO]') || (e.objectId && e.objectId.startsWith('DEMO-')));
+        }
+        else if (modeFilter === 'live') {
+            filtered = filtered.filter(e => e.source !== 'demo' && !e.reason.startsWith('[DEMO]') && (!e.objectId || !e.objectId.startsWith('DEMO-')));
+        }
         return filtered.slice(-limit).reverse();
+    }
+    /**
+     * Clears ONLY demo activity events, leaving live events untouched.
+     */
+    async clearDemoEvents() {
+        const beforeCount = this.fallbackEvents.length;
+        this.fallbackEvents = this.fallbackEvents.filter(e => e.source !== 'demo' && !e.reason.startsWith('[DEMO]') && (!e.objectId || !e.objectId.startsWith('DEMO-')));
+        const deletedCount = beforeCount - this.fallbackEvents.length;
+        if (client_1.dbClient.isConnected) {
+            try {
+                await client_1.dbClient.query(`DELETE FROM system_events WHERE reason LIKE '[DEMO]%' OR object_id LIKE 'DEMO-%'`);
+            }
+            catch (err) {
+                console.warn(`[EventRepo] DB clearDemoEvents error:`, err.message);
+            }
+        }
+        return deletedCount;
     }
 }
 exports.EventRepository = EventRepository;

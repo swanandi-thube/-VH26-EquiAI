@@ -13,7 +13,9 @@ class CacheController {
      * GET /api/cache/objects
      */
     async getCacheObjects(req, res) {
-        const objects = redis_1.redisCache.getAllObjects();
+        const mode = req.query.mode;
+        const filterPrefix = mode === 'demo' ? 'adaptivecache:demo:' : (mode === 'live' ? 'cache:obj:' : undefined);
+        const objects = redis_1.redisCache.getAllObjects(filterPrefix);
         const stats = redis_1.redisCache.getStats();
         res.json({
             success: true,
@@ -41,7 +43,8 @@ class CacheController {
         const objectId = req.params.id;
         const latency = req.query.latency ? parseInt(req.query.latency, 10) : undefined;
         const errorRate = req.query.errorRate ? parseFloat(req.query.errorRate) : undefined;
-        const result = await pipeline_1.pipeline.processRequest(objectId, latency, errorRate);
+        const mode = req.query.mode;
+        const result = await pipeline_1.pipeline.processRequest(objectId, latency, errorRate, mode);
         res.json({
             success: result.statusCode === 200,
             data: result,
@@ -52,7 +55,14 @@ class CacheController {
      */
     async getDecisions(req, res) {
         const limit = req.query.limit ? parseInt(req.query.limit, 10) : 50;
-        const decisions = await repositories_1.decisionRepository.getRecent(limit);
+        const mode = req.query.mode;
+        let decisions = await repositories_1.decisionRepository.getRecent(limit);
+        if (mode === 'demo') {
+            decisions = decisions.filter(d => d.source === 'demo' || d.reason.startsWith('[DEMO]') || d.objectId.startsWith('DEMO-'));
+        }
+        else if (mode === 'live') {
+            decisions = decisions.filter(d => d.source !== 'demo' && !d.reason.startsWith('[DEMO]') && !d.objectId.startsWith('DEMO-'));
+        }
         res.json({
             success: true,
             data: decisions,
@@ -81,7 +91,8 @@ class CacheController {
     async getEvents(req, res) {
         const limit = req.query.limit ? parseInt(req.query.limit, 10) : 100;
         const filter = req.query.filter;
-        const events = await repositories_1.eventRepository.getRecent(limit, filter);
+        const mode = req.query.mode;
+        const events = await repositories_1.eventRepository.getRecent(limit, filter, mode);
         res.json({
             success: true,
             data: events,
