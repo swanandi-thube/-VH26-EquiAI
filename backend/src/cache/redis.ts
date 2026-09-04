@@ -55,10 +55,13 @@ export class RedisCacheService {
   private async initRedis() {
     if (config.redisUrl) {
       try {
+        const isTls = config.redisUrl.startsWith('rediss://') || config.redisUrl.includes('upstash.io');
+
         this.redisClient = new Redis(config.redisUrl, {
           connectTimeout: 5000,
           maxRetriesPerRequest: 3,
           lazyConnect: true,
+          tls: isTls ? { rejectUnauthorized: false } : undefined,
           retryStrategy: (times) => {
             const delay = Math.min(times * 200, 3000);
             console.log(`[Redis] Reconnection attempt #${times} in ${delay}ms...`);
@@ -528,26 +531,63 @@ export class RedisCacheService {
   }
 
   /**
-   * Real health verification via PING
+   * Fetches real memory usage from Redis INFO memory if connected
+   */
+  public async getRealMemoryUsage(): Promise<{ usedMemoryBytes: number; maxMemoryBytes: number }> {
+    if (this.isConnected && this.redisClient) {
+      try {
+        const info = await this.redisClient.info('memory');
+        const usedMatch = info.match(/used_memory:(\d+)/);
+        const maxMatch = info.match(/maxmemory:(\d+)/);
+        const used = usedMatch && usedMatch[1] ? parseInt(usedMatch[1], 10) : null;
+        const max = maxMatch && maxMatch[1] ? parseInt(maxMatch[1], 10) : null;
+        return {
+          usedMemoryBytes: used !== null ? used : this.usedMemoryBytes,
+          maxMemoryBytes: max !== null && max > 0 ? max : this.maxMemoryBytes,
+        };
+      } catch {
+        return {
+          usedMemoryBytes: this.usedMemoryBytes,
+          maxMemoryBytes: this.maxMemoryBytes,
+        };
+      }
+    }
+    return {
+      usedMemoryBytes: this.usedMemoryBytes,
+      maxMemoryBytes: this.maxMemoryBytes,
+    };
+  }
+
+  /**
+   * Real health verification via PING/PONG
    */
   public async checkHealth(): Promise<{ status: 'CONNECTED' | 'DEGRADED' | 'OFFLINE'; latencyMs: number; message: string }> {
     const start = Date.now();
     if (this.redisClient) {
       try {
-        await this.redisClient.ping();
-        const latency = Date.now() - start;
-        this.isConnected = true;
-        return {
-          status: 'CONNECTED',
-          latencyMs: latency,
-          message: 'Redis live instance connected and responding',
-        };
+        const pong = await this.redisClient.ping();
+        if (pong === 'PONG') {
+          const latency = Date.now() - start;
+          this.isConnected = true;
+          return {
+            status: 'CONNECTED',
+            latencyMs: latency,
+            message: 'Redis live instance connected and responding (PING/PONG verified)',
+          };
+        } else {
+          this.isConnected = false;
+          return {
+            status: 'OFFLINE',
+            latencyMs: Date.now() - start,
+            message: `Redis live ping returned unexpected response: ${pong}`,
+          };
+        }
       } catch (err: any) {
         this.isConnected = false;
         return {
-          status: 'DEGRADED',
+          status: 'OFFLINE',
           latencyMs: Date.now() - start,
-          message: `Redis live ping failed: ${err.message}`,
+          message: `Redis connection failed: ${err.message}`,
         };
       }
     }
@@ -561,3 +601,4 @@ export class RedisCacheService {
 }
 
 export const redisCache = new RedisCacheService();
+

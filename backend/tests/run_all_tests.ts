@@ -52,20 +52,38 @@ async function runTests() {
   console.log('  RUNNING ADAPTIVECACHE AUTOMATED TEST SUITE');
   console.log('========================================================\n');
 
-  // Test 1: Redis Cache Engine Operations (GET, SET, TTL, Eviction)
-  console.log('--- Test Suite 1: Real Redis Cache Engine ---');
+  // Test 1: Redis Cache Engine Operations (GET, SET, DEL, EXPIRE, TTL, Eviction)
+  console.log('--- Test Suite 1: Real Redis Cache Engine Operations ---');
   await redisCache.flushall();
   redisCache.setCapacity(10000); // 10 KB small capacity
   await redisCache.set('product:1', JSON.stringify({ name: 'Test 1' }), { objectId: '1', sizeBytes: 4000, retrievalCostMs: 50 }, 10);
   const get1 = await redisCache.get('product:1');
-  assert(get1.hit === true, 'Cache SET and GET hit verified');
-  assert((await redisCache.ttl('product:1')) > 0, 'TTL correctly returned for active key');
+  assert(get1.hit === true, '1.1a Cache SET and GET hit verified');
+  const ttl1 = await redisCache.ttl('product:1');
+  assert(ttl1 > 0 && ttl1 <= 10, `1.1b Real TTL returned for active key (${ttl1}s)`);
 
-  // Insert two more items to force eviction of 10KB budget
+  // EXPIRE command verification
+  await redisCache.expire('product:1', 60);
+  const updatedTtl = await redisCache.ttl('product:1');
+  assert(updatedTtl > 10 && updatedTtl <= 60, `1.1c EXPIRE command updated TTL to ${updatedTtl}s`);
+
+  // DEL command verification
+  const delResult = await redisCache.del('product:1');
+  assert(delResult === true, '1.1d DEL command successfully deleted cache key');
+  const getAfterDel = await redisCache.get('product:1');
+  assert(getAfterDel.hit === false, '1.1e GET returns MISS after DEL');
+
+  // Insert items to force eviction of 10KB budget and verify eviction tracking separation
   await redisCache.set('product:2', JSON.stringify({ name: 'Test 2' }), { objectId: '2', sizeBytes: 4000, retrievalCostMs: 100 }, 10);
   await redisCache.set('product:3', JSON.stringify({ name: 'Test 3' }), { objectId: '3', sizeBytes: 4000, retrievalCostMs: 200 }, 10);
-  assert(redisCache.getStats().evictions >= 1, 'Memory capacity eviction triggered under budget constraint');
-  assert(redisCache.getStats().usedMemoryBytes <= 10000, 'Used memory strictly strictly within configured capacity');
+  await redisCache.set('product:4', JSON.stringify({ name: 'Test 4' }), { objectId: '4', sizeBytes: 4000, retrievalCostMs: 300 }, 10);
+  const stats = redisCache.getStats();
+  assert(stats.adaptiveEvictions >= 1, `1.1f AdaptiveCache logical eviction tracked separately (${stats.adaptiveEvictions})`);
+  assert(stats.redisNativeEvictions >= 0, `1.1g Redis native evictions tracked independently (${stats.redisNativeEvictions})`);
+  assert(stats.usedMemoryBytes <= 10000, '1.1h Memory capacity strictly maintained within configured budget');
+
+  const memUsage = await redisCache.getRealMemoryUsage();
+  assert(typeof memUsage.usedMemoryBytes === 'number' && memUsage.usedMemoryBytes >= 0, '1.1i Cache memory usage reported as valid numeric bytes');
 
   // Test 2: Request Coalescing (Singleflight deduplication)
   console.log('\n--- Test Suite 2: Request Coalescing (Singleflight) ---');
@@ -1187,18 +1205,38 @@ async function runTests() {
   const testObservations = await observationRepository.getRecentObservations('Product_Surge_99');
   assert(testObservations.length >= 3, '18.5c Observation repository operational across storage backends');
 
-  // 18.6 Idle Telemetry & Mathematical Load Accuracy
+  // 18.6 End-to-End Real Cache Request Flow (MISS -> Origin Fetch -> HIT)
+  circuitBreaker.reset();
+  const targetObjId = 'Product_1';
+  await redisCache.del(`cache:obj:${targetObjId}`);
+  const firstE2EReq = await cacheService.handleRequest(targetObjId, { mode: 'live' });
+  assert(firstE2EReq.cacheHit === false, '18.6a First request to un-cached object is a cache MISS');
+  assert(firstE2EReq.backendCalled === true, '18.6b Origin backend called on cache MISS');
+  assert(firstE2EReq.statusCode === 200, '18.6c First request succeeded with status 200');
+
+  const secondE2EReq = await cacheService.handleRequest(targetObjId, { mode: 'live' });
+  assert(secondE2EReq.cacheHit === true, '18.6d Second identical request is an immediate cache HIT');
+  assert(secondE2EReq.backendCalled === false, '18.6e Origin backend was NOT called on cache HIT');
+  assert(secondE2EReq.backendLatencyMs === 0, '18.6f Backend latency is 0ms on cache HIT');
+
+  const e2eTtl = await redisCache.ttl(`cache:obj:${targetObjId}`);
+  assert(e2eTtl > 0, `18.6g Real TTL returned for cached object (${e2eTtl}s)`);
+
+  // 18.7 Idle Telemetry & Mathematical Load Accuracy
   const idleCollector = new (telemetry.constructor as any)();
   const idleSnapshot = idleCollector.getSnapshot();
-  assert(idleSnapshot.totalRequests >= 0, '18.6a Telemetry totalRequests is non-negative');
-  assert(typeof idleSnapshot.backendLoadRatio === 'number', '18.6b Backend load ratio is numeric');
-  assert(typeof idleSnapshot.averageLatencyMs === 'number', '18.6c Average latency is numeric');
+  assert(idleSnapshot.totalRequests >= 0, '18.7a Telemetry totalRequests is non-negative');
+  assert(typeof idleSnapshot.backendLoadRatio === 'number', '18.7b Backend load ratio is numeric');
+  assert(typeof idleSnapshot.averageLatencyMs === 'number', '18.7c Average latency is numeric');
 
   // =========================================================================
   // Test Suite 19: Safe Demo Mode & Test Harness Isolation
   // =========================================================================
   console.log('\n--- Test Suite 19: Safe Demo Mode & Test Harness Isolation ---');
   redisCache.setCapacity(config.maxCacheCapacityBytes);
+  rateLimiter.setLimit(250, 250);
+  rateLimiter.reset();
+  circuitBreaker.reset();
 
 
   // 19.1 Demo Mode Status & Fixtures Metadata
