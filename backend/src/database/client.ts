@@ -26,27 +26,51 @@ export class DatabaseClient {
   private initPool() {
     if (config.databaseUrl) {
       try {
+        const isSsl = config.databaseUrl.includes('supabase') ||
+                      config.databaseUrl.includes('sslmode=require') ||
+                      config.databaseUrl.includes('render.com') ||
+                      config.databaseUrl.includes('aws');
+
         this.pool = new Pool({
           connectionString: config.databaseUrl,
           connectionTimeoutMillis: 5000,
           idleTimeoutMillis: 30000,
           max: this.maxPoolSize,
-          ssl: config.databaseUrl.includes('supabase') || config.databaseUrl.includes('sslmode=require')
-            ? { rejectUnauthorized: false }
-            : undefined,
+          ssl: isSsl ? { rejectUnauthorized: false } : undefined,
         });
 
         this.pool.on('error', (err) => {
+          this.isConnected = false;
           console.error('[Database Pool Error]:', err.message);
         });
 
-        console.log('[Database] PostgreSQL connection pool initialized with DATABASE_URL.');
+        // Run immediate startup probe
+        this.probeConnection();
       } catch (err: any) {
+        this.isConnected = false;
         console.warn('[Database] Failed to initialize PostgreSQL pool:', err.message);
         this.pool = null;
       }
     } else {
+      this.isConnected = false;
       console.log('[Database] No DATABASE_URL provided. Operating with in-memory relational store fallback.');
+    }
+  }
+
+  private async probeConnection() {
+    if (!this.pool) return;
+    try {
+      const client = await this.pool.connect();
+      try {
+        await client.query('SELECT 1');
+        this.isConnected = true;
+        console.log('[Database] PostgreSQL connection verified (SELECT 1 succeeded).');
+      } finally {
+        client.release();
+      }
+    } catch (err: any) {
+      this.isConnected = false;
+      console.warn(`[Database] PostgreSQL initial probe failed: ${err.message}`);
     }
   }
 
@@ -57,7 +81,6 @@ export class DatabaseClient {
     text: string,
     params?: any[]
   ): Promise<QueryResult<T>> {
-    const startTime = Date.now();
     this.activeConnections = Math.min(this.maxPoolSize, this.activeConnections + 1);
 
     if (!this.pool) {
@@ -67,7 +90,11 @@ export class DatabaseClient {
 
     try {
       const result = await this.pool.query<T>(text, params);
+      this.isConnected = true;
       return result;
+    } catch (err: any) {
+      console.warn(`[Database Query Error]: ${err.message}`);
+      throw err;
     } finally {
       this.activeConnections = Math.max(0, this.activeConnections - 1);
     }
@@ -102,6 +129,7 @@ export class DatabaseClient {
   public async checkHealth(): Promise<DbHealth> {
     const start = Date.now();
     if (!this.pool) {
+      this.isConnected = false;
       return {
         status: 'OFFLINE',
         latencyMs: 0,

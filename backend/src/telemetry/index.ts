@@ -62,21 +62,24 @@ export class TelemetryCollector {
     const totalRequests = windowLogs.length;
     const cacheHits = windowLogs.filter(l => l.cacheHit).length;
     const cacheMisses = totalRequests - cacheHits;
-    const cacheHitRate = totalRequests > 0 ? cacheHits / totalRequests : cacheStats.hitRate;
+    const cacheHitRate = totalRequests > 0
+      ? cacheHits / totalRequests
+      : ((cacheStats.hits + cacheStats.misses) > 0 ? cacheStats.hitRate : 0);
 
     const backendRequests = windowLogs.filter(l => !l.cacheHit && l.statusCode === 200).length;
-    const backendLoadRatio = totalRequests > 0 ? backendRequests / totalRequests : (1 - cacheHitRate);
+    // Backend load reflects the percentage of incoming traffic hitting origin data sources (0 when idle)
+    const backendLoadRatio = totalRequests > 0 ? backendRequests / totalRequests : 0;
 
-    // Latency Percentiles from actual recorded requests
+    // Latency Percentiles from actual recorded requests (0 when idle)
     const latencies = windowLogs.map(l => l.totalLatencyMs).sort((a, b) => a - b);
-    const avgLatency = latencies.length > 0 ? latencies.reduce((a, b) => a + b, 0) / latencies.length : 1.5;
-    const p50 = latencies.length > 0 ? latencies[Math.floor(latencies.length * 0.50)] : 1;
-    const p95 = latencies.length > 0 ? latencies[Math.floor(latencies.length * 0.95)] : 2;
-    const p99 = latencies.length > 0 ? latencies[Math.floor(latencies.length * 0.99)] : 5;
+    const avgLatency = latencies.length > 0 ? latencies.reduce((a, b) => a + b, 0) / latencies.length : 0;
+    const p50 = latencies.length > 0 ? latencies[Math.floor(latencies.length * 0.50)] : 0;
+    const p95 = latencies.length > 0 ? latencies[Math.floor(latencies.length * 0.95)] : 0;
+    const p99 = latencies.length > 0 ? latencies[Math.floor(latencies.length * 0.99)] : 0;
 
     // Calculate RPS (over last 5 seconds)
     const recent5s = windowLogs.filter(l => (now - l.timestamp) <= 5000);
-    const requestsPerSecond = Math.round((recent5s.length / 5.0) * 10) / 10;
+    const requestsPerSecond = recent5s.length > 0 ? Math.round((recent5s.length / 5.0) * 10) / 10 : 0;
 
     // Error rate in window
     const errorsInWindow = windowLogs.filter(l => l.statusCode >= 500 || l.statusCode === 429).length;

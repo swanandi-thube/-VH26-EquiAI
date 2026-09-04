@@ -34,28 +34,47 @@ class RedisCacheService {
         if (config_1.config.redisUrl) {
             try {
                 this.redisClient = new ioredis_1.default(config_1.config.redisUrl, {
-                    connectTimeout: 3000,
-                    maxRetriesPerRequest: 2,
+                    connectTimeout: 5000,
+                    maxRetriesPerRequest: 3,
                     lazyConnect: true,
-                    retryStrategy: (times) => Math.min(times * 100, 3000),
+                    retryStrategy: (times) => {
+                        const delay = Math.min(times * 200, 3000);
+                        console.log(`[Redis] Reconnection attempt #${times} in ${delay}ms...`);
+                        return delay;
+                    },
                 });
                 this.redisClient.on('connect', () => {
+                    console.log('[Redis] Socket connection established to REDIS_URL.');
+                });
+                this.redisClient.on('ready', () => {
                     this.isConnected = true;
-                    console.log('[Redis] Connected to live Redis instance via REDIS_URL.');
+                    console.log('[Redis] Live Redis instance ready and responsive.');
+                });
+                this.redisClient.on('reconnecting', (ms) => {
+                    this.isConnected = false;
+                    console.warn(`[Redis] Reconnecting to Redis in ${ms}ms...`);
+                });
+                this.redisClient.on('close', () => {
+                    this.isConnected = false;
                 });
                 this.redisClient.on('error', (err) => {
                     this.isConnected = false;
-                    console.warn('[Redis Error]:', err.message);
+                    console.warn(`[Redis Error]: ${err.message}`);
                 });
                 await this.redisClient.connect();
-                this.isConnected = true;
+                const pong = await this.redisClient.ping();
+                if (pong === 'PONG') {
+                    this.isConnected = true;
+                    console.log('[Redis] Initial PING verified (PONG received).');
+                }
             }
             catch (err) {
                 this.isConnected = false;
-                console.warn(`[Redis] Live connection failed (${err.message}). Using integrated high-speed Redis Cache Engine.`);
+                console.warn(`[Redis] Live connection failed (${err.message}). Operating in high-speed integrated Redis Cache Engine.`);
             }
         }
         else {
+            this.isConnected = false;
             console.log('[Redis] No REDIS_URL provided. Operating in high-speed integrated Redis Cache Engine.');
         }
     }

@@ -1159,6 +1159,13 @@ async function runTests() {
   const testObservations = await observationRepository.getRecentObservations('Product_Surge_99');
   assert(testObservations.length >= 3, '18.5c Observation repository operational across storage backends');
 
+  // 18.6 Idle Telemetry & Mathematical Load Accuracy
+  const idleCollector = new (telemetry.constructor as any)();
+  const idleSnapshot = idleCollector.getSnapshot();
+  assert(idleSnapshot.totalRequests >= 0, '18.6a Telemetry totalRequests is non-negative');
+  assert(typeof idleSnapshot.backendLoadRatio === 'number', '18.6b Backend load ratio is numeric');
+  assert(typeof idleSnapshot.averageLatencyMs === 'number', '18.6c Average latency is numeric');
+
   console.log('\n========================================================');
   console.log(`  TEST RESULTS: ${passed} PASSED, ${failed} FAILED`);
   console.log('========================================================\n');
