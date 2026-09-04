@@ -6,6 +6,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.decisionRepository = exports.DecisionRepository = void 0;
 const client_1 = require("../database/client");
+const db_1 = require("../db");
 class DecisionRepository {
     fallbackDecisions = [];
     maxMemoryDecisions = 5000;
@@ -14,6 +15,7 @@ class DecisionRepository {
      */
     async log(decision) {
         this.fallbackDecisions.push(decision);
+        db_1.db.logDecision(decision);
         if (this.fallbackDecisions.length > this.maxMemoryDecisions) {
             this.fallbackDecisions.splice(0, 1000);
         }

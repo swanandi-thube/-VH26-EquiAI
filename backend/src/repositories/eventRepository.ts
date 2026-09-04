@@ -4,6 +4,7 @@
  */
 
 import { dbClient } from '../database/client';
+import { db } from '../db';
 import { ActivityEvent } from '../types';
 
 export class EventRepository {
@@ -15,6 +16,7 @@ export class EventRepository {
    */
   public async log(event: ActivityEvent): Promise<void> {
     this.fallbackEvents.push(event);
+    db.logEvent(event);
     if (this.fallbackEvents.length > this.maxMemoryEvents) {
       this.fallbackEvents.splice(0, 500);
     }

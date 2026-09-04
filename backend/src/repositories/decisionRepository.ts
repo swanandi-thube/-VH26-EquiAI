@@ -4,6 +4,7 @@
  */
 
 import { dbClient } from '../database/client';
+import { db } from '../db';
 import { DecisionRecord } from '../types';
 
 export class DecisionRepository {
@@ -15,6 +16,7 @@ export class DecisionRepository {
    */
   public async log(decision: DecisionRecord): Promise<void> {
     this.fallbackDecisions.push(decision);
+    db.logDecision(decision);
     if (this.fallbackDecisions.length > this.maxMemoryDecisions) {
       this.fallbackDecisions.splice(0, 1000);
     }

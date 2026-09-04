@@ -1,0 +1,462 @@
+/**
+ * Real Cache Engine & Request Flow Service for ADAPTIVECACHE
+ * 
+ * Execution Flow:
+ * Application/frontend -> Backend API -> Cache Service -> Redis GET
+ *   HIT  -> Return cached data, calculate cache latency, update access metadata, do NOT call origin.
+ *   MISS -> Fetch from origin source, measure backend latency, Redis SET, record metadata & logs, return data.
+ */
+
+import { v4 as uuidv4 } from 'uuid';
+import { redisCache } from '../cache/redis';
+import { IOriginDataSource, defaultOriginAdapter } from './originAdapter';
+import {
+  requestLogRepository,
+  decisionRepository,
+  eventRepository,
+  settingsRepository,
+} from '../repositories';
+import { predictor } from '../engine/predictor';
+import { scorer } from '../engine/scorer';
+import { lifecycle } from '../engine/lifecycle';
+import { dbClient } from '../database/client';
+import { circuitBreaker } from '../protection/circuitBreaker';
+import { coalescer } from '../protection/coalescing';
+import { rateLimiter } from '../protection/rateLimiter';
+import { RequestLog, CacheObjectMetadata } from '../types';
+
+export interface CacheRequestResult {
+  requestId: string;
+  objectId: string;
+  cacheHit: boolean;
+  backendCalled: boolean;
+  cacheLatencyMs: number;
+  backendLatencyMs: number;
+  totalLatencyMs: number;
+  statusCode: number;
+  data: any | null;
+  responseSizeBytes: number;
+  metadata?: CacheObjectMetadata | null;
+  errorMessage?: string;
+  wasCoalesced?: boolean;
+}
+
+export class CacheService {
+  private originAdapter: IOriginDataSource;
+
+  constructor(originAdapter: IOriginDataSource = defaultOriginAdapter) {
+    this.originAdapter = originAdapter;
+  }
+
+  /**
+   * Set custom origin adapter (e.g. for testing)
+   */
+  public setOriginAdapter(adapter: IOriginDataSource): void {
+    this.originAdapter = adapter;
+  }
+
+  /**
+   * Core cache request execution flow
+   */
+  public async handleRequest(
+    objectId: string,
+    options?: {
+      simulatedLatencyMs?: number;
+      simulatedErrorRate?: number;
+      bypassRateLimiter?: boolean;
+    }
+  ): Promise<CacheRequestResult> {
+    const startTotalTime = Date.now();
+    const requestId = `REQ-${uuidv4().substring(0, 8)}`;
+    const cacheKey = `cache:obj:${objectId}`;
+
+    // 1. Rate Limiting Check (Token Bucket)
+    if (!options?.bypassRateLimiter && !rateLimiter.tryAcquire(1)) {
+      const totalLatency = Date.now() - startTotalTime;
+      const log: RequestLog = {
+        requestId,
+        timestamp: startTotalTime,
+        objectId,
+        operation: 'GET',
+        responseSizeBytes: 0,
+        cacheHit: false,
+        backendCalled: false,
+        backendLatencyMs: 0,
+        cacheLatencyMs: 0,
+        totalLatencyMs: totalLatency,
+        statusCode: 429,
+        errorMessage: 'Rate limit exceeded (Token Bucket Throttled)',
+      };
+      await requestLogRepository.log(log);
+      await eventRepository.log({
+        id: `EVT-${uuidv4().substring(0, 8)}`,
+        timestamp: startTotalTime,
+        eventType: 'RATE-LIMIT',
+        objectId,
+        reason: 'Rate limit exceeded: incoming rate above configured RPS',
+      });
+
+      return {
+        requestId,
+        objectId,
+        cacheHit: false,
+        backendCalled: false,
+        cacheLatencyMs: 0,
+        backendLatencyMs: 0,
+        totalLatencyMs: totalLatency,
+        statusCode: 429,
+        data: null,
+        responseSizeBytes: 0,
+        errorMessage: 'Too Many Requests (Rate Limited)',
+      };
+    }
+
+    // 2. Record access timestamp for statistical demand prediction
+    predictor.recordAccess(objectId, startTotalTime);
+
+    // 3. Redis GET with cache latency measurement
+    const cacheGetStart = Date.now();
+    const cacheResult = await redisCache.get(cacheKey);
+    const cacheLatencyMs = Math.max(1, Date.now() - cacheGetStart);
+
+    // =========================================================================
+    // CACHE HIT PATH
+    // =========================================================================
+    if (cacheResult.hit && cacheResult.value !== null) {
+      let parsedData: any;
+      try {
+        parsedData = JSON.parse(cacheResult.value);
+      } catch {
+        parsedData = cacheResult.value;
+      }
+
+      const totalLatencyMs = Math.max(1, Date.now() - startTotalTime);
+      const meta = cacheResult.metadata!;
+
+      // Update access metadata (frequency and last_access)
+      const now = Date.now();
+      meta.lastAccessed = now;
+      meta.accessCount = (meta.accessCount || 0) + 1;
+      meta.frequency = meta.accessCount;
+      meta.updatedAt = now;
+
+      // Lifecycle evaluation on hit (e.g. background refresh if TTL is almost exhausted)
+      const settings = await settingsRepository.getSettings();
+      const pool = dbClient.getMetrics();
+      const factors = scorer.calculateFactors(meta, settings, {
+        poolUtilization: pool.utilization,
+        queueDepth: pool.connectionQueueDepth,
+        errorRate: circuitBreaker.getStats().errorRate,
+        avgBackendLatencyMs: 50,
+      });
+
+      const evalResult = lifecycle.evaluate(meta, factors, settings, true);
+      meta.adaptiveScore = factors.finalScore;
+      meta.currentState = evalResult.decision;
+      meta.lastDecision = evalResult.decision;
+      meta.lastDecisionTime = now;
+
+      // Update metadata in Redis
+      redisCache.updateMetadata(cacheKey, meta);
+
+      // If decision is REFRESH, trigger asynchronous background refresh
+      if (evalResult.decision === 'REFRESH') {
+        redisCache.incrementRefresh();
+        this.triggerBackgroundRefresh(objectId, cacheKey);
+      }
+
+      // Record Request Log for HIT
+      const log: RequestLog = {
+        requestId,
+        timestamp: startTotalTime,
+        objectId,
+        operation: 'GET',
+        responseSizeBytes: meta.sizeBytes,
+        cacheHit: true,
+        backendCalled: false,
+        backendLatencyMs: 0,
+        cacheLatencyMs,
+        totalLatencyMs,
+        statusCode: 200,
+        wasCoalesced: false,
+      };
+      await requestLogRepository.log(log);
+
+      return {
+        requestId,
+        objectId,
+        cacheHit: true,
+        backendCalled: false,
+        cacheLatencyMs,
+        backendLatencyMs: 0,
+        totalLatencyMs,
+        statusCode: 200,
+        data: parsedData,
+        responseSizeBytes: meta.sizeBytes,
+        metadata: meta,
+      };
+    }
+
+    // =========================================================================
+    // CACHE MISS PATH
+    // =========================================================================
+    // 4. Check Circuit Breaker before calling origin
+    if (!circuitBreaker.canExecute()) {
+      const totalLatencyMs = Date.now() - startTotalTime;
+      const log: RequestLog = {
+        requestId,
+        timestamp: startTotalTime,
+        objectId,
+        operation: 'GET',
+        responseSizeBytes: 0,
+        cacheHit: false,
+        backendCalled: false,
+        backendLatencyMs: 0,
+        cacheLatencyMs,
+        totalLatencyMs,
+        statusCode: 503,
+        errorMessage: 'Circuit Breaker is OPEN. Backend protection short-circuited request.',
+      };
+      await requestLogRepository.log(log);
+      await eventRepository.log({
+        id: `EVT-${uuidv4().substring(0, 8)}`,
+        timestamp: startTotalTime,
+        eventType: 'CIRCUIT-BREAKER',
+        objectId,
+        reason: 'Circuit Breaker OPEN: request short-circuited to protect degraded backend',
+      });
+
+      return {
+        requestId,
+        objectId,
+        cacheHit: false,
+        backendCalled: false,
+        cacheLatencyMs,
+        backendLatencyMs: 0,
+        totalLatencyMs,
+        statusCode: 503,
+        data: null,
+        responseSizeBytes: 0,
+        errorMessage: 'Service Unavailable (Circuit Breaker OPEN)',
+      };
+    }
+
+    // 5. Fetch from Origin with Singleflight Coalescing
+    const { result: originResult, wasCoalesced } = await coalescer.execute(cacheKey, async () => {
+      return await this.originAdapter.fetchObject(objectId, {
+        simulatedLatencyMs: options?.simulatedLatencyMs,
+        simulatedErrorRate: options?.simulatedErrorRate,
+      });
+    });
+
+    const isSuccess = originResult.statusCode === 200 && originResult.data !== null;
+    circuitBreaker.recordResult(isSuccess);
+
+    const totalLatencyMs = Date.now() - startTotalTime;
+
+    if (!isSuccess || !originResult.data) {
+      // Origin lookup failed or 404
+      const log: RequestLog = {
+        requestId,
+        timestamp: startTotalTime,
+        objectId,
+        operation: 'GET',
+        responseSizeBytes: 0,
+        cacheHit: false,
+        backendCalled: true,
+        backendLatencyMs: originResult.retrievalCostMs,
+        cacheLatencyMs,
+        totalLatencyMs,
+        statusCode: originResult.statusCode,
+        errorMessage: originResult.errorMessage || 'Origin lookup failed',
+        wasCoalesced,
+      };
+      await requestLogRepository.log(log);
+      await eventRepository.log({
+        id: `EVT-${uuidv4().substring(0, 8)}`,
+        timestamp: startTotalTime,
+        eventType: 'BACKEND-ERROR',
+        objectId,
+        reason: originResult.errorMessage || `Origin returned status code ${originResult.statusCode}`,
+      });
+
+      return {
+        requestId,
+        objectId,
+        cacheHit: false,
+        backendCalled: true,
+        cacheLatencyMs,
+        backendLatencyMs: originResult.retrievalCostMs,
+        totalLatencyMs,
+        statusCode: originResult.statusCode,
+        data: null,
+        responseSizeBytes: 0,
+        errorMessage: originResult.errorMessage || 'Origin query failed',
+        wasCoalesced,
+      };
+    }
+
+    // 6. Decision Engine & Multi-Factor Scoring for newly retrieved object
+    const settings = await settingsRepository.getSettings();
+    const pool = dbClient.getMetrics();
+
+    const candidateMeta: Partial<CacheObjectMetadata> = {
+      objectId,
+      key: cacheKey,
+      sizeBytes: originResult.sizeBytes,
+      retrievalCostMs: originResult.retrievalCostMs,
+      backendLatencyMs: originResult.retrievalCostMs,
+      accessCount: 1,
+      lastAccessed: Date.now(),
+      createdAt: Date.now(),
+    };
+
+    const factors = scorer.calculateFactors(candidateMeta, settings, {
+      poolUtilization: pool.utilization,
+      queueDepth: pool.connectionQueueDepth,
+      errorRate: circuitBreaker.getStats().errorRate,
+      avgBackendLatencyMs: originResult.retrievalCostMs,
+    });
+
+    const evalResult = lifecycle.evaluate(candidateMeta as any, factors, settings, false);
+    await decisionRepository.log(evalResult.decisionRecord);
+
+    const now = Date.now();
+    const fullMetadata: CacheObjectMetadata = {
+      objectId,
+      key: cacheKey,
+      sizeBytes: originResult.sizeBytes,
+      createdAt: now,
+      updatedAt: now,
+      lastAccessed: now,
+      accessCount: 1,
+      frequency: 1,
+      recentAccessCount: 1,
+      retrievalCostMs: originResult.retrievalCostMs,
+      backendLatencyMs: originResult.retrievalCostMs,
+      ttlSeconds: evalResult.newTtlSeconds,
+      remainingTtlSeconds: evalResult.newTtlSeconds,
+      expiresAt: now + (evalResult.newTtlSeconds * 1000),
+      predictedDemand: factors.predictedDemand,
+      confidence: factors.confidence,
+      adaptiveScore: factors.finalScore,
+      lastDecision: evalResult.decision,
+      currentState: evalResult.decision,
+      lastDecisionTime: now,
+      isPreCached: evalResult.decision === 'PRE-CACHE',
+    };
+
+    // 7. Store in Redis Live Cache (Redis SET / SETEX)
+    await redisCache.set(
+      cacheKey,
+      JSON.stringify(originResult.data),
+      fullMetadata,
+      evalResult.newTtlSeconds
+    );
+
+    if (evalResult.decision === 'PRE-CACHE') {
+      redisCache.incrementPreCache();
+      await eventRepository.log({
+        id: `EVT-${uuidv4().substring(0, 8)}`,
+        timestamp: now,
+        eventType: 'PRE-CACHE',
+        objectId,
+        score: factors.finalScore,
+        reason: evalResult.reason,
+      });
+    }
+
+    // 8. Store Request Log for MISS
+    const log: RequestLog = {
+      requestId,
+      timestamp: startTotalTime,
+      objectId,
+      operation: 'GET',
+      responseSizeBytes: originResult.sizeBytes,
+      cacheHit: false,
+      backendCalled: true,
+      backendLatencyMs: originResult.retrievalCostMs,
+      cacheLatencyMs,
+      totalLatencyMs,
+      statusCode: 200,
+      wasCoalesced,
+    };
+    await requestLogRepository.log(log);
+
+    return {
+      requestId,
+      objectId,
+      cacheHit: false,
+      backendCalled: true,
+      cacheLatencyMs,
+      backendLatencyMs: originResult.retrievalCostMs,
+      totalLatencyMs,
+      statusCode: 200,
+      data: originResult.data,
+      responseSizeBytes: originResult.sizeBytes,
+      metadata: fullMetadata,
+      wasCoalesced,
+    };
+  }
+
+  /**
+   * Background asynchronous refresh for high-value cache entities
+   */
+  private async triggerBackgroundRefresh(objectId: string, cacheKey: string) {
+    try {
+      const originResult = await this.originAdapter.fetchObject(objectId);
+      if (originResult.statusCode === 200 && originResult.data) {
+        const settings = await settingsRepository.getSettings();
+        const pool = dbClient.getMetrics();
+        const factors = scorer.calculateFactors(
+          {
+            objectId,
+            sizeBytes: originResult.sizeBytes,
+            retrievalCostMs: originResult.retrievalCostMs,
+            backendLatencyMs: originResult.retrievalCostMs,
+            accessCount: 10,
+          },
+          settings,
+          {
+            poolUtilization: pool.utilization,
+            queueDepth: pool.connectionQueueDepth,
+            errorRate: 0,
+            avgBackendLatencyMs: originResult.retrievalCostMs,
+          }
+        );
+        const evalRes = lifecycle.evaluate({ objectId } as any, factors, settings, true);
+        const now = Date.now();
+        await redisCache.set(
+          cacheKey,
+          JSON.stringify(originResult.data),
+          {
+            objectId,
+            sizeBytes: originResult.sizeBytes,
+            retrievalCostMs: originResult.retrievalCostMs,
+            backendLatencyMs: originResult.retrievalCostMs,
+            ttlSeconds: evalRes.newTtlSeconds,
+            predictedDemand: factors.predictedDemand,
+            confidence: factors.confidence,
+            adaptiveScore: factors.finalScore,
+            lastDecision: 'REFRESH',
+            currentState: 'REFRESH',
+            updatedAt: now,
+          },
+          evalRes.newTtlSeconds
+        );
+        await eventRepository.log({
+          id: `EVT-${uuidv4().substring(0, 8)}`,
+          timestamp: now,
+          eventType: 'REFRESH',
+          objectId,
+          score: factors.finalScore,
+          reason: `Background refresh succeeded. TTL extended by ${evalRes.newTtlSeconds}s`,
+        });
+      }
+    } catch (err: any) {
+      console.warn(`[CacheService] Background refresh error for ${objectId}:`, err.message);
+    }
+  }
+}
+
+export const cacheService = new CacheService();

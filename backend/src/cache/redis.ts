@@ -137,20 +137,18 @@ export class RedisCacheService {
           let meta: CacheObjectMetadata;
           if (metaStr) {
             meta = JSON.parse(metaStr);
-            meta.lastAccessed = now;
-            meta.accessCount++;
-            meta.recentAccessCount++;
             const ttl = await this.redisClient.ttl(key);
             meta.remainingTtlSeconds = Math.max(0, ttl);
-            await this.redisClient.set(`${key}:meta`, JSON.stringify(meta), 'EX', Math.max(ttl, 1));
           } else {
             meta = {
               objectId: key.replace(/^cache:(obj:)?/, ''),
               key,
               sizeBytes: Buffer.byteLength(val, 'utf8'),
               createdAt: now,
+              updatedAt: now,
               lastAccessed: now,
               accessCount: 1,
+              frequency: 1,
               recentAccessCount: 1,
               retrievalCostMs: 50,
               backendLatencyMs: 50,
@@ -161,6 +159,7 @@ export class RedisCacheService {
               confidence: 0.5,
               adaptiveScore: 0.5,
               lastDecision: 'KEEP',
+              currentState: 'KEEP',
               lastDecisionTime: now,
             };
           }
@@ -188,10 +187,6 @@ export class RedisCacheService {
       return { value: null, metadata: null, hit: false };
     }
 
-    // Update access statistics
-    entry.metadata.lastAccessed = now;
-    entry.metadata.accessCount++;
-    entry.metadata.recentAccessCount++;
     if (entry.expiresAt) {
       entry.metadata.remainingTtlSeconds = Math.max(0, Math.round((entry.expiresAt - now) / 1000));
     }
@@ -222,10 +217,12 @@ export class RedisCacheService {
       objectId: metadataPartial.objectId || key.replace(/^cache:(obj:)?/, ''),
       key,
       sizeBytes,
-      createdAt: now,
-      lastAccessed: now,
-      accessCount: (metadataPartial.accessCount || 0) + 1,
-      recentAccessCount: (metadataPartial.recentAccessCount || 0) + 1,
+      createdAt: metadataPartial.createdAt || now,
+      updatedAt: metadataPartial.updatedAt || now,
+      lastAccessed: metadataPartial.lastAccessed || now,
+      accessCount: metadataPartial.accessCount !== undefined ? metadataPartial.accessCount : 1,
+      frequency: metadataPartial.frequency !== undefined ? metadataPartial.frequency : (metadataPartial.accessCount || 1),
+      recentAccessCount: metadataPartial.recentAccessCount !== undefined ? metadataPartial.recentAccessCount : 1,
       retrievalCostMs: metadataPartial.retrievalCostMs || 50,
       backendLatencyMs: metadataPartial.backendLatencyMs || 50,
       ttlSeconds: ttl,
@@ -235,7 +232,8 @@ export class RedisCacheService {
       confidence: metadataPartial.confidence ?? 0.5,
       adaptiveScore: metadataPartial.adaptiveScore ?? 0.5,
       lastDecision: metadataPartial.lastDecision || 'KEEP',
-      lastDecisionTime: now,
+      currentState: metadataPartial.currentState || metadataPartial.lastDecision || 'KEEP',
+      lastDecisionTime: metadataPartial.lastDecisionTime || now,
       payloadPreview: value.length > 100 ? value.substring(0, 100) + '...' : value,
       isPreCached: metadataPartial.isPreCached || false,
     };

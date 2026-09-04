@@ -108,7 +108,9 @@ export interface RequestLog {
   operation: 'GET' | 'SET' | 'INVALIDATE';
   responseSizeBytes: number;
   cacheHit: boolean;
+  backendCalled: boolean;
   backendLatencyMs: number;
+  cacheLatencyMs: number;
   totalLatencyMs: number;
   statusCode: number;
   errorMessage?: string;

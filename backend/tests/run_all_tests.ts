@@ -12,6 +12,10 @@ import { lifecycle } from '../src/engine/lifecycle';
 import { predictor } from '../src/engine/predictor';
 import { benchmarkEngine } from '../src/benchmark/engine';
 import { costEngine } from '../src/engine/cost';
+import { cacheService } from '../src/services/cacheService';
+import { requestLogRepository } from '../src/repositories';
+import { telemetry } from '../src/telemetry';
+import { IOriginDataSource } from '../src/services/originAdapter';
 
 let passed = 0;
 let failed = 0;
@@ -150,6 +154,78 @@ async function runTests() {
   assert(costRes.baselineCostPerHour > costRes.adaptiveCostPerHour, 'AdaptiveCache cost is strictly lower than un-cached baseline');
   assert(costRes.netSavingsPerHour > 0, `Positive net savings calculated: $${costRes.netSavingsPerHour}/hr`);
   assert(costRes.backendLoadReductionPercent === 80, `Backend load reduction verified at 80% (got ${costRes.backendLoadReductionPercent}%)`);
+
+  // Test 9: Phase 2 Real Cache Engine Flow (HIT/MISS/Redis/Origin/Metadata/Logs/Dashboard)
+  console.log('\n--- Test Suite 9: Phase 2 Real Cache Engine Request Flow ---');
+  rateLimiter.reset();
+  rateLimiter.setLimit(500, 500);
+  circuitBreaker.reset();
+  await redisCache.flushall();
+  redisCache.setCapacity(64 * 1024 * 1024);
+
+  let originCallCount = 0;
+  const mockOrigin: IOriginDataSource = {
+    fetchObject: async (id: string) => {
+      originCallCount++;
+      return {
+        objectId: id,
+        data: { id, title: 'Phase 2 Real Cache Object', timestamp: Date.now() },
+        sizeBytes: 2048,
+        retrievalCostMs: 45,
+        statusCode: 200,
+        sourceType: 'DEV_ADAPTER',
+      };
+    },
+  };
+  cacheService.setOriginAdapter(mockOrigin);
+
+  const initialSnapshot = telemetry.getSnapshot();
+
+  // 1. First request = MISS
+  const res1 = await cacheService.handleRequest('obj_phase2_flow');
+  assert(res1.cacheHit === false, '1. First request = MISS verified (cacheHit === false)');
+  // 2. Origin accessed
+  assert(res1.backendCalled === true, '2. Origin accessed on MISS (backendCalled === true)');
+  assert(originCallCount === 1, '2b. Origin fetch count exactly 1');
+  // 3. Redis SET
+  const redisEntry1 = await redisCache.get('cache:obj:obj_phase2_flow');
+  assert(redisEntry1.hit === true && redisEntry1.value !== null, '3. Stored in Redis via Redis SET');
+  assert(redisEntry1.metadata?.sizeBytes === 2048, '3b. Metadata size recorded');
+  assert(redisEntry1.metadata?.frequency === 1, '3c. Metadata frequency initialized to 1');
+  assert(redisEntry1.metadata?.currentState !== undefined, '3d. Metadata current_state maintained');
+
+  // 4. Second request = HIT
+  const res2 = await cacheService.handleRequest('obj_phase2_flow');
+  assert(res2.cacheHit === true, '4. Second request = HIT verified (cacheHit === true)');
+  // 5. Origin not called on HIT
+  assert(res2.backendCalled === false, '5. Origin NOT called on HIT (backendCalled === false)');
+  assert(originCallCount === 1, '5b. Origin count remained 1 (no unnecessary origin call on HIT)');
+
+  // 6. Metadata updates
+  const redisEntry2 = await redisCache.get('cache:obj:obj_phase2_flow');
+  assert(redisEntry2.metadata?.frequency === 2, '6a. Metadata frequency incremented to 2 on HIT');
+  assert((redisEntry2.metadata?.lastAccessed || 0) >= (redisEntry1.metadata?.lastAccessed || 0), '6b. Metadata last_access timestamp updated');
+  assert(redisEntry2.metadata?.updatedAt !== undefined, '6c. Metadata updated_at maintained');
+  assert(redisEntry2.metadata?.ttlSeconds! > 0, '6d. Metadata ttl maintained');
+
+  // 7. Request logs created
+  const recentLogs = await requestLogRepository.getRecent(10);
+  const logMiss = recentLogs.find(l => l.requestId === res1.requestId);
+  const logHit = recentLogs.find(l => l.requestId === res2.requestId);
+  assert(logMiss !== undefined && logMiss.cacheHit === false && logMiss.backendCalled === true, '7a. Request log created for MISS with backend_called=true');
+  assert(logHit !== undefined && logHit.cacheHit === true && logHit.backendCalled === false, '7b. Request log created for HIT with backend_called=false');
+  assert(logMiss!.responseSizeBytes === 2048, '7c. Request log contains response_size');
+  assert(logMiss!.backendLatencyMs === 45, '7d. Request log contains backend_latency');
+  assert(logHit!.cacheLatencyMs >= 0, '7e. Request log contains cache_latency');
+  assert(logMiss!.totalLatencyMs >= 0, '7f. Request log contains total_latency');
+  assert(logMiss!.statusCode === 200, '7g. Request log contains status_code');
+
+  // 8. Dashboard values change from actual requests
+  const updatedSnapshot = telemetry.getSnapshot();
+  assert(updatedSnapshot.totalRequests > initialSnapshot.totalRequests, '8a. Dashboard totalRequests updated from actual requests');
+  assert(updatedSnapshot.cacheHits > initialSnapshot.cacheHits, '8b. Dashboard cacheHits updated from actual requests');
+  assert(updatedSnapshot.cacheMisses > initialSnapshot.cacheMisses, '8c. Dashboard cacheMisses updated from actual requests');
+  assert(updatedSnapshot.cachedObjectsCount > 0, '8d. Dashboard cachedObjectsCount reflects actual Redis keys');
 
   console.log('\n========================================================');
   console.log(`  TEST RESULTS: ${passed} PASSED, ${failed} FAILED`);

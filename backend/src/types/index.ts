@@ -37,8 +37,10 @@ export interface CacheObjectMetadata {
   key: string;
   sizeBytes: number;
   createdAt: number;
+  updatedAt?: number;
   lastAccessed: number;
   accessCount: number;
+  frequency?: number;
   recentAccessCount: number;
   retrievalCostMs: number;
   backendLatencyMs: number;
@@ -49,6 +51,7 @@ export interface CacheObjectMetadata {
   confidence: number;      // 0.0 to 1.0
   adaptiveScore: number;   // 0.0 to 1.0
   lastDecision: DecisionType;
+  currentState?: string;
   lastDecisionTime: number;
   payloadPreview?: string;
   isPreCached?: boolean;
@@ -87,7 +90,9 @@ export interface RequestLog {
   operation: 'GET' | 'SET' | 'INVALIDATE';
   responseSizeBytes: number;
   cacheHit: boolean;
+  backendCalled: boolean;
   backendLatencyMs: number;
+  cacheLatencyMs: number;
   totalLatencyMs: number;
   statusCode: number;
   errorMessage?: string;
