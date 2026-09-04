@@ -38,21 +38,25 @@ class WebSocketService {
         });
         // Circuit Breaker state change notifications
         circuitBreaker_1.circuitBreaker.onStateChange((oldState, newState, reason) => {
-            this.broadcast({
-                type: 'CIRCUIT_BREAKER_EVENT',
-                data: {
-                    oldState,
-                    newState,
-                    reason,
-                    timestamp: Date.now(),
-                },
-            });
-            db_1.db.logEvent({
+            let eventType = 'CIRCUIT-BREAKER';
+            if (newState === 'OPEN')
+                eventType = 'CIRCUIT_OPEN';
+            else if (newState === 'HALF-OPEN')
+                eventType = 'CIRCUIT_HALF_OPEN';
+            else if (newState === 'CLOSED')
+                eventType = 'CIRCUIT_CLOSED';
+            const eventPayload = {
                 id: `EVT-${(0, uuid_1.v4)().substring(0, 8)}`,
                 timestamp: Date.now(),
-                eventType: 'CIRCUIT-BREAKER',
+                eventType,
                 reason: `Circuit Breaker transitioned: ${oldState} -> ${newState} (${reason})`,
+                metadata: { oldState, newState, reason },
+            };
+            this.broadcast({
+                type: 'CIRCUIT_BREAKER_EVENT',
+                data: eventPayload,
             });
+            db_1.db.logEvent(eventPayload);
         });
         // Start 4Hz (250ms) telemetry broadcast stream
         this.broadcastInterval = setInterval(() => {

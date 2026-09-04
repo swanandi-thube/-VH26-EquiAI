@@ -7,6 +7,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { ReplayConfig, ReplayMetrics } from '../types';
 import { workloadRepository } from '../repositories/workloadRepository';
+import { eventRepository } from '../repositories/eventRepository';
 import { cacheService } from '../services/cacheService';
 import { redisCache } from '../cache/redis';
 
@@ -76,6 +77,14 @@ export class ReplayRunner {
     };
 
     // 3. Launch asynchronous replay execution worker pool
+    eventRepository.log({
+      id: `EVT-${uuidv4().substring(0, 8)}`,
+      timestamp: Date.now(),
+      eventType: 'WORKLOAD_STARTED',
+      reason: `Workload trace replay started: "${workload.filename}" (${requests.length} requests at ${requestsPerSecond} RPS)`,
+      metadata: { workloadId, requestsCount: requests.length, concurrency },
+    });
+
     this.executeReplayLoop(requests, requestsPerSecond, concurrency, burstTraffic, speedMultiplier);
 
     return { ...this.activeReplay };
@@ -183,6 +192,14 @@ export class ReplayRunner {
         this.activeReplay.p95LatencyMs = sorted[Math.floor(sorted.length * 0.95)] || 0;
       }
       this.activeReplay.evictionsCount = redisCache.getStats().adaptiveEvictions;
+
+      eventRepository.log({
+        id: `EVT-${uuidv4().substring(0, 8)}`,
+        timestamp: Date.now(),
+        eventType: 'WORKLOAD_COMPLETED',
+        reason: `Workload trace replay completed: ${this.activeReplay.requestsCompleted} requests (${this.activeReplay.cacheHits} hits, ${this.activeReplay.cacheMisses} misses)`,
+        metadata: { ...this.activeReplay },
+      });
     }
 
     this.isRunning = false;

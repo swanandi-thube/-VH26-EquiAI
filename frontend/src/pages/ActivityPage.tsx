@@ -48,20 +48,38 @@ export const ActivityPage: React.FC = () => {
     return matchesSearch;
   });
 
-  const getEventBadge = (type: EventType) => {
+  const getEventBadge = (type: EventType | string) => {
     switch (type) {
+      case 'CACHE_HIT':
+      case 'CACHE-HIT':
+        return <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded text-[10px] font-mono font-bold">CACHE HIT</span>;
+      case 'CACHE_MISS':
+      case 'CACHE-MISS':
+        return <span className="bg-orange-500/20 text-orange-300 border border-orange-500/30 px-2 py-0.5 rounded text-[10px] font-mono font-bold">CACHE MISS</span>;
+      case 'PRE_CACHE':
       case 'PRE-CACHE':
         return <span className="bg-amber-600/20 text-amber-300 border border-amber-600/30 px-2 py-0.5 rounded text-[10px] font-mono font-bold">PRE-CACHE</span>;
       case 'REFRESH':
         return <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded text-[10px] font-mono font-bold">REFRESH</span>;
       case 'EVICT':
-        return <span className="bg-orange-500/20 text-orange-300 border border-orange-500/30 px-2 py-0.5 rounded text-[10px] font-mono font-bold">EVICT</span>;
+        return <span className="bg-rose-500/20 text-rose-300 border border-rose-500/30 px-2 py-0.5 rounded text-[10px] font-mono font-bold">EVICT</span>;
+      case 'CIRCUIT_OPEN':
+        return <span className="bg-rose-600/20 text-rose-300 border border-rose-600/40 px-2 py-0.5 rounded text-[10px] font-mono font-bold animate-pulse">CIRCUIT OPEN</span>;
+      case 'CIRCUIT_HALF_OPEN':
+        return <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded text-[10px] font-mono font-bold">CIRCUIT HALF-OPEN</span>;
+      case 'CIRCUIT_CLOSED':
+        return <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded text-[10px] font-mono font-bold">CIRCUIT CLOSED</span>;
       case 'CIRCUIT-BREAKER':
         return <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded text-[10px] font-mono font-bold">CIRCUIT-BREAKER</span>;
+      case 'WORKLOAD_STARTED':
+        return <span className="bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 px-2 py-0.5 rounded text-[10px] font-mono font-bold">WORKLOAD START</span>;
+      case 'WORKLOAD_COMPLETED':
+        return <span className="bg-purple-500/20 text-purple-300 border border-purple-500/30 px-2 py-0.5 rounded text-[10px] font-mono font-bold">WORKLOAD COMPLETE</span>;
       case 'RATE-LIMIT':
         return <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded text-[10px] font-mono font-bold">RATE-LIMIT</span>;
+      case 'BACKEND_FAILURE':
       case 'BACKEND-ERROR':
-        return <span className="bg-red-500/20 text-red-300 border border-red-500/30 px-2 py-0.5 rounded text-[10px] font-mono font-bold">BACKEND-ERROR</span>;
+        return <span className="bg-red-500/20 text-red-300 border border-red-500/30 px-2 py-0.5 rounded text-[10px] font-mono font-bold">BACKEND ERROR</span>;
       case 'KEEP':
       default:
         return <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded text-[10px] font-mono font-bold">KEEP</span>;
@@ -107,7 +125,7 @@ export const ActivityPage: React.FC = () => {
 
       {/* Filter Chips Bar */}
       <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs font-mono">
-        {['ALL', 'KEEP', 'REFRESH', 'EVICT', 'PRE-CACHE', 'CIRCUIT-BREAKER', 'RATE-LIMIT', 'BACKEND-ERROR'].map((filter) => (
+        {['ALL', 'CACHE_HIT', 'CACHE_MISS', 'KEEP', 'REFRESH', 'EVICT', 'PRE_CACHE', 'CIRCUIT_OPEN', 'CIRCUIT_CLOSED', 'WORKLOAD_STARTED', 'WORKLOAD_COMPLETED', 'RATE-LIMIT', 'BACKEND_FAILURE'].map((filter) => (
           <button
             key={filter}
             onClick={() => setSelectedFilter(filter)}
@@ -117,7 +135,7 @@ export const ActivityPage: React.FC = () => {
                 : 'bg-dark-850 border-dark-750 text-stone-400 hover:text-stone-200 hover:border-dark-700'
             }`}
           >
-            {filter}
+            {filter.replace('_', ' ')}
           </button>
         ))}
       </div>

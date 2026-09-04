@@ -19,12 +19,17 @@ import { IOriginDataSource } from '../src/services/originAdapter';
 import { workloadIngestionService } from '../src/services/workloadIngestionService';
 import { explainability } from '../src/engine/explainability';
 import { changeDetector } from '../src/engine/changeDetector';
-import { observationRepository, decisionRepository, settingsRepository, benchmarkRepository } from '../src/repositories';
+import { observationRepository, decisionRepository, settingsRepository, benchmarkRepository, eventRepository } from '../src/repositories';
 import { observationController } from '../src/controllers/observationController';
 import { replayRunner } from '../src/workload/replayRunner';
 import { requestQueue } from '../src/protection/requestQueue';
 import { retryController } from '../src/protection/retryController';
 import { whatIfEngine } from '../src/engine/whatif';
+import { dbClient } from '../src/database/client';
+import { MigrationRunner } from '../src/database/migrations';
+import { config } from '../src/config';
+import { wsService } from '../src/ws/server';
+import { EventType } from '../src/types';
 
 let passed = 0;
 let failed = 0;
@@ -1032,6 +1037,127 @@ async function runTests() {
     updatedCost.netSavingsPerHour > costBreakdown.netSavingsPerHour,
     '16.5 Higher database query cost increases financial savings from caching'
   );
+
+  // =========================================================================
+  // Test Suite 17: Phase 10 Activity Stream & Real-Time Dashboard (WebSocket & Events)
+  // =========================================================================
+  console.log('\n--- Test Suite 17: Phase 10 Activity Stream & Real-Time Dashboard ---');
+
+  const allRequiredEventTypes: EventType[] = [
+    'CACHE_HIT',
+    'CACHE_MISS',
+    'KEEP',
+    'REFRESH',
+    'EVICT',
+    'PRE_CACHE',
+    'BACKEND_FAILURE',
+    'CIRCUIT_OPEN',
+    'CIRCUIT_HALF_OPEN',
+    'CIRCUIT_CLOSED',
+    'WORKLOAD_STARTED',
+    'WORKLOAD_COMPLETED',
+  ];
+
+  // 17.1 Log all 12 core event types
+  for (let i = 0; i < allRequiredEventTypes.length; i++) {
+    const evtType = allRequiredEventTypes[i];
+    await eventRepository.log({
+      id: `EVT-TEST-${i + 1}-${evtType}`,
+      timestamp: Date.now() + i * 10,
+      eventType: evtType,
+      objectId: `TestObject_${evtType}`,
+      score: 0.85,
+      reason: `Automated test verification for event type ${evtType}`,
+      metadata: { testIndex: i, testType: evtType },
+    });
+  }
+
+  // 17.2 Retrieve unfiltered events
+  const allLoggedEvents = await eventRepository.getRecent(50);
+  assert(allLoggedEvents.length >= 12, `17.1 All 12 event types logged and retrieved (got ${allLoggedEvents.length})`);
+
+  // 17.3 Verify Event schema integrity
+  const sampleEvt = allLoggedEvents.find(e => e.id === 'EVT-TEST-1-CACHE_HIT');
+  assert(sampleEvt !== undefined, '17.2a Sample CACHE_HIT event retrieved by ID');
+  assert(sampleEvt?.eventType === 'CACHE_HIT', '17.2b Event type matches CACHE_HIT');
+  assert(sampleEvt?.objectId === 'TestObject_CACHE_HIT', '17.2c Event objectId matches');
+  assert(sampleEvt?.score === 0.85, '17.2d Event score preserved');
+  assert(typeof sampleEvt?.timestamp === 'number', '17.2e Event timestamp is numeric');
+  assert(Boolean(sampleEvt?.reason.includes('CACHE_HIT')), '17.2f Event reason preserved');
+  assert(sampleEvt?.metadata?.testType === 'CACHE_HIT', '17.2g Event metadata JSON preserved');
+
+  // 17.4 Filter by specific event types
+  const circuitOpenEvents = await eventRepository.getRecent(50, 'CIRCUIT_OPEN');
+  assert(circuitOpenEvents.length >= 1, '17.3a Filtered query for CIRCUIT_OPEN returned matching events');
+  assert(circuitOpenEvents.every(e => e.eventType === 'CIRCUIT_OPEN'), '17.3b All returned events have eventType === CIRCUIT_OPEN');
+
+  const workloadStartEvents = await eventRepository.getRecent(50, 'WORKLOAD_STARTED');
+  assert(workloadStartEvents.length >= 1, '17.3c Filtered query for WORKLOAD_STARTED returned matching events');
+  assert(workloadStartEvents.every(e => e.eventType === 'WORKLOAD_STARTED'), '17.3d All returned events have eventType === WORKLOAD_STARTED');
+
+  // 17.5 Empty state handling for non-existent event types
+  const emptyFilterEvents = await eventRepository.getRecent(50, 'NON_EXISTENT_FILTER_TYPE' as any);
+  assert(emptyFilterEvents.length === 0, '17.4 Filter query for non-matching type returns empty array for graceful empty state');
+
+  // 17.6 WebSocket Broadcaster validation
+  let broadcastSuccess = true;
+  try {
+    wsService.broadcast({
+      type: 'ACTIVITY_EVENT',
+      data: {
+        id: 'EVT-WS-TEST',
+        timestamp: Date.now(),
+        eventType: 'KEEP',
+        reason: 'WebSocket broadcast validation',
+      },
+    });
+  } catch {
+    broadcastSuccess = false;
+  }
+  assert(broadcastSuccess === true, '17.5 WebSocket broadcaster dispatches activity frames safely');
+  assert(typeof wsService.getActiveClientCount() === 'number', '17.6 WebSocket active client count returns numeric status');
+
+  // =========================================================================
+  // Test Suite 18: Phase 11 Production Deployment Readiness & Subsystems
+  // =========================================================================
+  console.log('\n--- Test Suite 18: Phase 11 Production Deployment Readiness ---');
+
+  // 18.1 Redis Subsystem Health Check
+  const redisHealth = await redisCache.checkHealth();
+  assert(['CONNECTED', 'DEGRADED', 'OFFLINE'].includes(redisHealth.status), `18.1a Redis health status is valid: ${redisHealth.status}`);
+  assert(typeof redisHealth.latencyMs === 'number', '18.1b Redis latency reported as numeric ms');
+  assert(typeof redisHealth.message === 'string', '18.1c Redis health description provided');
+
+  // 18.2 PostgreSQL Subsystem Health Check
+  const dbHealth = await dbClient.checkHealth();
+  assert(['CONNECTED', 'DEGRADED', 'OFFLINE'].includes(dbHealth.status), `18.2a PostgreSQL health status is valid: ${dbHealth.status}`);
+  assert(typeof dbHealth.latencyMs === 'number', '18.2b PostgreSQL latency reported as numeric ms');
+  assert(typeof dbHealth.message === 'string', '18.2c PostgreSQL health description provided');
+
+  // 18.3 Dynamic Configuration Parsing & No Hardcoded Localhost
+  assert(typeof config.port === 'number' && config.port > 0, `18.3a Server port configured dynamically (${config.port})`);
+  assert(typeof config.corsOrigin === 'string' && config.corsOrigin.length > 0, `18.3b CORS origin configured dynamically (${config.corsOrigin})`);
+  assert(config.defaultTtlSeconds > 0, `18.3c Default TTL configured (${config.defaultTtlSeconds}s)`);
+  assert(config.maxCacheCapacityBytes > 0, `18.3d Max cache capacity configured (${config.maxCacheCapacityBytes} bytes)`);
+
+  // 18.4 Database Migration Idempotency
+  let migrationRanSafely = true;
+  try {
+    await MigrationRunner.runMigrations();
+  } catch (err) {
+    migrationRanSafely = false;
+  }
+  assert(migrationRanSafely === true, '18.4 Database migrations run idempotently without error');
+
+  // 18.5 In-Memory Fallback Reliability Across Repositories
+  const testSettingObj = await settingsRepository.getSettings();
+  assert(testSettingObj !== null && testSettingObj.minTtlSeconds !== undefined, '18.5a Settings repository operational across storage backends');
+
+  const testLogs = await requestLogRepository.getRecent(10);
+  assert(Array.isArray(testLogs), '18.5b Request log repository operational across storage backends');
+
+  const testObservations = await observationRepository.getRecentObservations('Product_Surge_99');
+  assert(testObservations.length >= 3, '18.5c Observation repository operational across storage backends');
 
   console.log('\n========================================================');
   console.log(`  TEST RESULTS: ${passed} PASSED, ${failed} FAILED`);

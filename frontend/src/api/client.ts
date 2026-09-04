@@ -18,7 +18,17 @@ import {
   ProtectionStats
 } from '../types';
 
-const API_BASE = (import.meta as any).env?.VITE_API_URL || '/api';
+const getApiBase = (): string => {
+  const envUrl = (import.meta as any).env?.VITE_API_URL;
+  if (!envUrl) return '/api';
+  let trimmed = envUrl.replace(/\/+$/, '');
+  if (!trimmed.endsWith('/api') && (trimmed.startsWith('http://') || trimmed.startsWith('https://'))) {
+    trimmed = `${trimmed}/api`;
+  }
+  return trimmed;
+};
+
+const API_BASE = getApiBase();
 
 export const apiClient = {
   async getDashboardMetrics(): Promise<TelemetrySnapshot> {

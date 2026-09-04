@@ -102,9 +102,24 @@ export const TelemetryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     const connectWs = () => {
       const envWsUrl = (import.meta as any).env?.VITE_WS_URL;
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const host = window.location.host;
-      const wsUrl = envWsUrl || `${protocol}//${host}/ws`;
+      const envApiUrl = (import.meta as any).env?.VITE_API_URL;
+      let wsUrl: string;
+
+      if (envWsUrl) {
+        wsUrl = envWsUrl;
+      } else if (envApiUrl && (envApiUrl.startsWith('http://') || envApiUrl.startsWith('https://'))) {
+        try {
+          const parsed = new URL(envApiUrl);
+          const proto = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
+          wsUrl = `${proto}//${parsed.host}/ws`;
+        } catch {
+          const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+          wsUrl = `${protocol}//${window.location.host}/ws`;
+        }
+      } else {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        wsUrl = `${protocol}//${window.location.host}/ws`;
+      }
 
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;

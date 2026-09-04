@@ -8,6 +8,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.replayRunner = exports.ReplayRunner = void 0;
 const uuid_1 = require("uuid");
 const workloadRepository_1 = require("../repositories/workloadRepository");
+const eventRepository_1 = require("../repositories/eventRepository");
 const cacheService_1 = require("../services/cacheService");
 const redis_1 = require("../cache/redis");
 class ReplayRunner {
@@ -60,6 +61,13 @@ class ReplayRunner {
             startedAt: Date.now(),
         };
         // 3. Launch asynchronous replay execution worker pool
+        eventRepository_1.eventRepository.log({
+            id: `EVT-${(0, uuid_1.v4)().substring(0, 8)}`,
+            timestamp: Date.now(),
+            eventType: 'WORKLOAD_STARTED',
+            reason: `Workload trace replay started: "${workload.filename}" (${requests.length} requests at ${requestsPerSecond} RPS)`,
+            metadata: { workloadId, requestsCount: requests.length, concurrency },
+        });
         this.executeReplayLoop(requests, requestsPerSecond, concurrency, burstTraffic, speedMultiplier);
         return { ...this.activeReplay };
     }
@@ -148,6 +156,13 @@ class ReplayRunner {
                 this.activeReplay.p95LatencyMs = sorted[Math.floor(sorted.length * 0.95)] || 0;
             }
             this.activeReplay.evictionsCount = redis_1.redisCache.getStats().adaptiveEvictions;
+            eventRepository_1.eventRepository.log({
+                id: `EVT-${(0, uuid_1.v4)().substring(0, 8)}`,
+                timestamp: Date.now(),
+                eventType: 'WORKLOAD_COMPLETED',
+                reason: `Workload trace replay completed: ${this.activeReplay.requestsCompleted} requests (${this.activeReplay.cacheHits} hits, ${this.activeReplay.cacheMisses} misses)`,
+                metadata: { ...this.activeReplay },
+            });
         }
         this.isRunning = false;
     }

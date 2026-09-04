@@ -17,15 +17,24 @@ export type WorkloadType =
 
 export type SystemHealthStatus = 'CONNECTED' | 'DEGRADED' | 'OFFLINE';
 export type EventType =
+  | 'CACHE_HIT'
+  | 'CACHE_MISS'
+  | 'CACHE-HIT'
+  | 'CACHE-MISS'
   | 'KEEP'
   | 'REFRESH'
   | 'EVICT'
+  | 'PRE_CACHE'
   | 'PRE-CACHE'
-  | 'CACHE-HIT'
-  | 'CACHE-MISS'
+  | 'BACKEND_FAILURE'
+  | 'BACKEND-ERROR'
+  | 'CIRCUIT_OPEN'
+  | 'CIRCUIT_HALF_OPEN'
+  | 'CIRCUIT_CLOSED'
   | 'CIRCUIT-BREAKER'
   | 'RATE-LIMIT'
-  | 'BACKEND-ERROR'
+  | 'WORKLOAD_STARTED'
+  | 'WORKLOAD_COMPLETED'
   | 'SCALE';
 
 export interface CacheObjectMetadata {

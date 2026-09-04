@@ -7,6 +7,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.eventRepository = exports.EventRepository = void 0;
 const client_1 = require("../database/client");
 const db_1 = require("../db");
+const server_1 = require("../ws/server");
 class EventRepository {
     fallbackEvents = [];
     maxMemoryEvents = 2000;
@@ -16,6 +17,16 @@ class EventRepository {
     async log(event) {
         this.fallbackEvents.push(event);
         db_1.db.logEvent(event);
+        // Live WebSocket broadcast to connected dashboard clients
+        try {
+            server_1.wsService.broadcast({
+                type: 'ACTIVITY_EVENT',
+                data: event,
+            });
+        }
+        catch {
+            // Ignore if wsService not ready
+        }
         if (this.fallbackEvents.length > this.maxMemoryEvents) {
             this.fallbackEvents.splice(0, 500);
         }

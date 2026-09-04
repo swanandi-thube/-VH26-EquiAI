@@ -6,6 +6,7 @@
 import { dbClient } from '../database/client';
 import { db } from '../db';
 import { ActivityEvent } from '../types';
+import { wsService } from '../ws/server';
 
 export class EventRepository {
   private fallbackEvents: ActivityEvent[] = [];
@@ -17,6 +18,17 @@ export class EventRepository {
   public async log(event: ActivityEvent): Promise<void> {
     this.fallbackEvents.push(event);
     db.logEvent(event);
+
+    // Live WebSocket broadcast to connected dashboard clients
+    try {
+      wsService.broadcast({
+        type: 'ACTIVITY_EVENT',
+        data: event,
+      });
+    } catch {
+      // Ignore if wsService not ready
+    }
+
     if (this.fallbackEvents.length > this.maxMemoryEvents) {
       this.fallbackEvents.splice(0, 500);
     }
