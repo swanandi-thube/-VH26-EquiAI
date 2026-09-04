@@ -1,0 +1,38 @@
+{
+  "name": "adaptivecache-platform",
+  "version": "1.0.0",
+  "description": "AdaptiveCache - Application-Aware Intelligent Caching & Backend Protection Platform",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "install:all": "npm install --workspace=backend && npm install --workspace=frontend",
+    "dev:backend": "npm run dev --workspace=backend",
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"cyan,magenta\" \"npm run dev --workspace=backend\" \"npm run dev --workspace=frontend\"",
+    "build:frontend": "npm run build --workspace=frontend",
+    "build:backend": "npm run build --workspace=backend",
+    "build": "npm run build:backend && npm run build:frontend",
+    "start": "node backend/dist/server.js",
+    "test": "npm run test --workspace=backend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "keywords": [
+    "cache",
+    "adaptive-caching",
+    "lru",
+    "lfu",
+    "gds",
+    "redis",
+    "postgresql",
+    "observability",
+    "backend-protection",
+    "telemetry"
+  ],
+  "author": "AdaptiveCache Team",
+  "license": "MIT"
+}
