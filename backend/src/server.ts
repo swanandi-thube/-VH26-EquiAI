@@ -1,9 +1,11 @@
 /**
  * ADAPTIVECACHE Backend Server Entry Point
- * Express API + WebSocket Stream + Prometheus Metrics
+ * Express API + WebSocket Stream + Prometheus Metrics + Frontend Static Serving
  */
 
 import http from 'http';
+import path from 'path';
+import fs from 'fs';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -34,23 +36,35 @@ app.get('/metrics', async (req, res) => {
   }
 });
 
-// Root ping
-app.get('/', (req, res) => {
-  res.json({
-    name: 'ADAPTIVECACHE API',
-    status: 'OPERATIONAL',
-    version: '2.0.0',
-    endpoints: {
-      metrics: '/api/dashboard/metrics',
-      objects: '/api/cache/objects',
-      decisions: '/api/cache/decisions',
-      workloads: '/api/workloads/start',
-      benchmarks: '/api/benchmark/run',
-      prometheus: '/metrics',
-      websocket: '/ws',
+// Serve frontend static assets if dist folder exists
+const frontendDistPath = path.resolve(__dirname, '../../frontend/dist');
+if (fs.existsSync(frontendDistPath)) {
+  app.use(express.static(frontendDistPath));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/metrics') || req.path.startsWith('/ws')) {
+      return next();
     }
+    res.sendFile(path.join(frontendDistPath, 'index.html'));
   });
-});
+  console.log(`[Static] Serving frontend from ${frontendDistPath}`);
+} else {
+  app.get('/', (req, res) => {
+    res.json({
+      name: 'ADAPTIVECACHE API',
+      status: 'OPERATIONAL',
+      version: '2.0.0',
+      endpoints: {
+        metrics: '/api/dashboard/metrics',
+        objects: '/api/cache/objects',
+        decisions: '/api/cache/decisions',
+        workloads: '/api/workloads/start',
+        benchmarks: '/api/benchmark/run',
+        prometheus: '/metrics',
+        websocket: '/ws',
+      }
+    });
+  });
+}
 
 const server = http.createServer(app);
 
@@ -61,8 +75,8 @@ server.listen(PORT, () => {
   console.log('================================================================');
   console.log('  ADAPTIVECACHE - Intelligent Caching & Backend Protection Platform');
   console.log('================================================================');
-  console.log(`  ✓ REST API Server:   http://localhost:${PORT}/api`);
-  console.log(`  ✓ WebSocket Stream:  ws://localhost:${PORT}/ws`);
-  console.log(`  ✓ Prometheus Metric: http://localhost:${PORT}/metrics`);
+  console.log(`  ✓ Dashboard UI & REST API: http://localhost:${PORT}/`);
+  console.log(`  ✓ WebSocket Stream:        ws://localhost:${PORT}/ws`);
+  console.log(`  ✓ Prometheus Metrics:      http://localhost:${PORT}/metrics`);
   console.log('================================================================');
 });

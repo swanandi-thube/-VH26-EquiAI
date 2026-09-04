@@ -1,43 +1,42 @@
 """
-EquiAI Application Launcher
-Starts the Python FastAPI backend server on http://localhost:8000/ and opens the Observability Console in the default browser.
+ADAPTIVECACHE Platform Launcher
+Starts the backend server and opens the real-time Observability Dashboard in the browser.
 """
 
 import sys
+import subprocess
 import webbrowser
 import threading
 import time
-import uvicorn
-
+import os
 
 def open_browser():
-    time.sleep(1.2)
+    time.sleep(1.8)
     url = "http://localhost:8000/"
-    print(f"\nOpening EquiAI Observability Console at: {url}\n")
+    print(f"\nOpening ADAPTIVECACHE Observability Console at: {url}\n")
     try:
         webbrowser.open(url)
     except Exception as e:
         print(f"Could not open browser automatically: {e}")
 
-
 def main():
     port = 8000
-    host = "0.0.0.0"
-
     print("=" * 70)
-    print("EquiAI - Adaptive, Application-Aware Cache Management System")
+    print("  ADAPTIVECACHE: Application-Aware Intelligent Caching Platform")
     print("=" * 70)
-    print(f"Backend FastAPI Server starting at: http://localhost:{port}/")
-    print(f"WebSocket Live Stream: ws://localhost:{port}/ws")
-    print(f"Observability Dashboard: http://localhost:{port}/")
+    print(f"  ✓ Dashboard & API:   http://localhost:{port}/")
+    print(f"  ✓ Live Stream:       ws://localhost:{port}/ws")
+    print(f"  ✓ Prometheus:        http://localhost:{port}/metrics")
     print("=" * 70)
 
     # Launch browser thread
     threading.Thread(target=open_browser, daemon=True).start()
 
-    # Run Uvicorn server
-    uvicorn.run("backend.app:app", host=host, port=port, reload=False, log_level="info")
-
+    # Start Backend server via npm start --prefix backend
+    backend_dir = os.path.join(os.path.dirname(__file__), "backend")
+    
+    # Run dev server
+    subprocess.run(["npx", "ts-node", "src/server.ts"], cwd=backend_dir, shell=True)
 
 if __name__ == "__main__":
     main()

@@ -1,0 +1,165 @@
+/**
+ * Type-Safe REST API Client for ADAPTIVECACHE
+ */
+
+import {
+  TelemetrySnapshot,
+  CacheObjectMetadata,
+  DecisionRecord,
+  DecisionExplanation,
+  ActivityEvent,
+  WorkloadConfig,
+  WorkloadRun,
+  BenchmarkRun,
+  WhatIfScenarioInput,
+  WhatIfComparison,
+  SystemSettings,
+  SystemHealthReport,
+  ProtectionStats
+} from '../types';
+
+const API_BASE = '/api';
+
+export const apiClient = {
+  async getDashboardMetrics(): Promise<TelemetrySnapshot> {
+    const res = await fetch(`${API_BASE}/dashboard/metrics`);
+    const json = await res.json();
+    return json.data;
+  },
+
+  async getCacheObjects(): Promise<{ objects: CacheObjectMetadata[]; stats: any }> {
+    const res = await fetch(`${API_BASE}/cache/objects`);
+    const json = await res.json();
+    return json.data;
+  },
+
+  async flushCache(): Promise<void> {
+    await fetch(`${API_BASE}/cache/flush`, { method: 'POST' });
+  },
+
+  async executeRequest(objectId: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/cache/request/${objectId}`, { method: 'POST' });
+    return await res.json();
+  },
+
+  async getDecisions(limit = 50): Promise<DecisionRecord[]> {
+    const res = await fetch(`${API_BASE}/cache/decisions?limit=${limit}`);
+    const json = await res.json();
+    return json.data;
+  },
+
+  async getDecisionExplanation(decisionId: string): Promise<DecisionExplanation> {
+    const res = await fetch(`${API_BASE}/cache/decisions/${decisionId}/explain`);
+    const json = await res.json();
+    return json.data;
+  },
+
+  async getEvents(limit = 100, filter = 'ALL'): Promise<ActivityEvent[]> {
+    const url = filter && filter !== 'ALL'
+      ? `${API_BASE}/cache/events?limit=${limit}&filter=${filter}`
+      : `${API_BASE}/cache/events?limit=${limit}`;
+    const res = await fetch(url);
+    const json = await res.json();
+    return json.data;
+  },
+
+  async startWorkload(config: WorkloadConfig): Promise<WorkloadRun> {
+    const res = await fetch(`${API_BASE}/workloads/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    });
+    const json = await res.json();
+    return json.data;
+  },
+
+  async stopWorkload(): Promise<WorkloadRun | null> {
+    const res = await fetch(`${API_BASE}/workloads/stop`, { method: 'POST' });
+    const json = await res.json();
+    return json.data;
+  },
+
+  async getActiveWorkload(): Promise<{ isRunning: boolean; activeRun: WorkloadRun | null }> {
+    const res = await fetch(`${API_BASE}/workloads/active`);
+    const json = await res.json();
+    return json.data;
+  },
+
+  async getProtectionStats(): Promise<ProtectionStats> {
+    const res = await fetch(`${API_BASE}/protection/stats`);
+    const json = await res.json();
+    return json.data;
+  },
+
+  async resetProtection(): Promise<void> {
+    await fetch(`${API_BASE}/protection/reset`, { method: 'POST' });
+  },
+
+  async runBenchmark(params: { requestCount?: number; objectCount?: number; capacityMb?: number; traceName?: string }): Promise<BenchmarkRun> {
+    const res = await fetch(`${API_BASE}/benchmark/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    const json = await res.json();
+    return json.data;
+  },
+
+  async getBenchmarkRuns(): Promise<BenchmarkRun[]> {
+    const res = await fetch(`${API_BASE}/benchmark/runs`);
+    const json = await res.json();
+    return json.data;
+  },
+
+  async getBenchmarkRunById(id: string): Promise<BenchmarkRun> {
+    const res = await fetch(`${API_BASE}/benchmark/${id}`);
+    const json = await res.json();
+    return json.data;
+  },
+
+  async runWhatIfScenario(scenario: WhatIfScenarioInput): Promise<WhatIfComparison> {
+    const res = await fetch(`${API_BASE}/scenarios/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(scenario),
+    });
+    const json = await res.json();
+    return json.data;
+  },
+
+  async applyScenario(scenario: WhatIfScenarioInput): Promise<void> {
+    await fetch(`${API_BASE}/scenarios/apply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(scenario),
+    });
+  },
+
+  async getCost(): Promise<any> {
+    const res = await fetch(`${API_BASE}/cost`);
+    const json = await res.json();
+    return json.data;
+  },
+
+  async getSystemHealth(): Promise<SystemHealthReport> {
+    const res = await fetch(`${API_BASE}/system/health`);
+    const json = await res.json();
+    return json.data;
+  },
+
+  async getSettings(): Promise<SystemSettings> {
+    const res = await fetch(`${API_BASE}/settings`);
+    const json = await res.json();
+    return json.data;
+  },
+
+  async updateSettings(settings: Partial<SystemSettings>): Promise<SystemSettings> {
+    const res = await fetch(`${API_BASE}/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    });
+    const json = await res.json();
+    return json.data;
+  },
+};
