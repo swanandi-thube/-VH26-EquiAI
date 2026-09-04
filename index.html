@@ -1,0 +1,970 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Adaptive, Application-Aware Cache Management System | Observability Console</title>
+  
+  <!-- CSS Design System & Layout -->
+  <link rel="stylesheet" href="css/theme.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/components.css">
+</head>
+<body>
+  <div id="app-container">
+    
+    <!-- 1. TOP GLOBAL HEADER -->
+    <header id="global-header">
+      <div class="brand-section">
+        <span class="brand-badge">PROTOTYPE</span>
+        <div class="brand-title">
+          <span>SMART CACHE</span>
+          <span class="brand-subtitle">Adaptive, Application-Aware Cache Management System</span>
+        </div>
+      </div>
+
+      <div class="header-status-group">
+        <div class="status-indicator">
+          <span id="header-status-dot" class="status-dot"></span>
+          <span id="header-status-text">SIMULATION RUNNING</span>
+        </div>
+
+        <div class="btn-group">
+          <button id="btn-play-pause" class="btn btn-outline btn-sm">❚❚ Pause</button>
+          <button id="btn-sim-step" class="btn btn-outline btn-sm">► Step</button>
+          <button id="btn-sim-reset" class="btn btn-outline btn-sm">↺ Reset</button>
+        </div>
+
+        <button id="btn-start-demo" class="btn btn-primary btn-sm">
+          ★ 5-Minute Guided Demo
+        </button>
+      </div>
+    </header>
+
+    <!-- 2. TOP TELEMETRY STICKY RIBBON -->
+    <div id="telemetry-ribbon">
+      <div class="telemetry-item">
+        <span class="telemetry-label">Hit Rate</span>
+        <div class="telemetry-value-wrap">
+          <span id="tel-hit-rate" class="telemetry-value text-success">86.4%</span>
+        </div>
+      </div>
+
+      <div class="telemetry-item">
+        <span class="telemetry-label">P95 Latency</span>
+        <div class="telemetry-value-wrap">
+          <span id="tel-p95" class="telemetry-value">8.2ms</span>
+        </div>
+      </div>
+
+      <div class="telemetry-item">
+        <span class="telemetry-label">P99 Latency</span>
+        <div class="telemetry-value-wrap">
+          <span id="tel-p99" class="telemetry-value text-info">24.5ms</span>
+        </div>
+      </div>
+
+      <div class="telemetry-item">
+        <span class="telemetry-label">Backend Load</span>
+        <div class="telemetry-value-wrap">
+          <span id="tel-backend-load" class="telemetry-value">22%</span>
+        </div>
+      </div>
+
+      <div class="telemetry-item">
+        <span class="telemetry-label">Database CPU</span>
+        <div class="telemetry-value-wrap">
+          <span id="tel-db-cpu" class="telemetry-value text-warning">28%</span>
+        </div>
+      </div>
+
+      <div class="telemetry-item">
+        <span class="telemetry-label">Hourly Cost</span>
+        <div class="telemetry-value-wrap">
+          <span id="tel-cost" class="telemetry-value">$0.248</span>
+          <span class="telemetry-unit">/hr</span>
+        </div>
+      </div>
+
+      <div class="telemetry-item">
+        <span class="telemetry-label">Cost Savings</span>
+        <div class="telemetry-value-wrap">
+          <span id="tel-savings" class="telemetry-value text-success">$0.622</span>
+          <span class="telemetry-unit">/hr</span>
+        </div>
+      </div>
+
+      <div class="telemetry-item">
+        <span class="telemetry-label">Cache Memory</span>
+        <div class="telemetry-value-wrap">
+          <span id="tel-memory" class="telemetry-value">342 MB</span>
+        </div>
+      </div>
+
+      <div class="telemetry-item">
+        <span class="telemetry-label">Evictions</span>
+        <div class="telemetry-value-wrap">
+          <span id="tel-evictions" class="telemetry-value text-dim">14</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. MAIN WORKSPACE BODY -->
+    <div id="workspace-body">
+      
+      <!-- Left Sidebar Navigation -->
+      <nav id="sidebar-nav">
+        <div class="nav-section-title">Core Views</div>
+        <button class="nav-tab-btn active" data-tab="overview">
+          <span class="nav-icon">📊</span>
+          <span>1. System Overview</span>
+        </button>
+        <button class="nav-tab-btn" data-tab="live-sim">
+          <span class="nav-icon">⚡</span>
+          <span>2. Live Simulation</span>
+        </button>
+        <button class="nav-tab-btn" data-tab="objects">
+          <span class="nav-icon">📦</span>
+          <span>3. Cache Objects</span>
+          <span class="nav-badge">Live</span>
+        </button>
+        <button class="nav-tab-btn" data-tab="decision-engine">
+          <span class="nav-icon">🧠</span>
+          <span>4. Decision Engine</span>
+        </button>
+
+        <div class="nav-section-title">Evaluation & Battling</div>
+        <button class="nav-tab-btn" data-tab="battle">
+          <span class="nav-icon">⚔️</span>
+          <span>5. Strategy Battle</span>
+        </button>
+        <button class="nav-tab-btn" data-tab="benchmark">
+          <span class="nav-icon">🔬</span>
+          <span>6. Benchmark Lab</span>
+          <span class="nav-badge">Twin</span>
+        </button>
+
+        <div class="nav-section-title">Infrastructure & Observability</div>
+        <button class="nav-tab-btn" data-tab="cost-scaling">
+          <span class="nav-icon">💰</span>
+          <span>7. Cost & Scaling</span>
+        </button>
+        <button class="nav-tab-btn" data-tab="database">
+          <span class="nav-icon">🗄️</span>
+          <span>8. DB & Backend</span>
+        </button>
+        <button class="nav-tab-btn" data-tab="timemachine">
+          <span class="nav-icon">⏳</span>
+          <span>9. Time Machine</span>
+        </button>
+        <button class="nav-tab-btn" data-tab="pollution">
+          <span class="nav-icon">🛡️</span>
+          <span>10. Pollution Defense</span>
+        </button>
+        <button class="nav-tab-btn" data-tab="architecture">
+          <span class="nav-icon">🏗️</span>
+          <span>11. Architecture</span>
+        </button>
+      </nav>
+
+      <!-- Main Viewport Panels -->
+      <main id="main-viewport">
+        
+        <!-- =================================================================
+             TAB 1: SYSTEM OVERVIEW
+             ================================================================= -->
+        <section id="view-overview" class="view-panel active">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h2>System Telemetry & Causal Pipeline</h2>
+              <p>Real-time causal pipeline coupling traffic patterns, multi-factor scoring, database load, latency, and cost.</p>
+            </div>
+            <div class="btn-group">
+              <button class="btn btn-sm btn-outline scenario-btn active" data-scenario="STEADY">Steady</button>
+              <button class="btn btn-sm btn-outline scenario-btn" data-scenario="POPULARITY_SPIKE">🔥 Spike</button>
+              <button class="btn btn-sm btn-outline scenario-btn" data-scenario="GRADUAL_SHIFT">Shift</button>
+              <button class="btn btn-sm btn-outline scenario-btn" data-scenario="COLD_START">Cold Start</button>
+              <button class="btn btn-sm btn-outline scenario-btn" data-scenario="TRAFFIC_BURST">Burst</button>
+              <button class="btn btn-sm btn-outline scenario-btn" data-scenario="CACHE_POLLUTION">Pollution</button>
+            </div>
+          </div>
+
+          <!-- Connected Live Pipeline Flow -->
+          <div class="pipeline-container">
+            <div class="pipeline-header">
+              <span>Connected Simulation Dataflow (Traffic ➔ Cache ➔ Database ➔ Latency ➔ Cost ➔ Scaling)</span>
+              <span class="badge badge-info">Real-Time Propagated</span>
+            </div>
+            <div id="live-pipeline-track" class="pipeline-nodes-track">
+              <!-- Populated dynamically by pipeline visualizer -->
+            </div>
+          </div>
+
+          <!-- Real-Time Charts Grid (2x2) -->
+          <div class="grid-2">
+            <div class="obs-card">
+              <div class="obs-card-header">
+                <span class="obs-card-title">Traffic Throughput (RPS)</span>
+                <span class="obs-card-subtitle">Generated Request Volume</span>
+              </div>
+              <canvas id="chart-traffic" style="width: 100%; height: 160px;"></canvas>
+            </div>
+
+            <div class="obs-card">
+              <div class="obs-card-header">
+                <span class="obs-card-title">Cache Hit Rate (%)</span>
+                <span class="obs-card-subtitle">Smart Adaptive In-Memory Lookups</span>
+              </div>
+              <canvas id="chart-hit-rate" style="width: 100%; height: 160px;"></canvas>
+            </div>
+
+            <div class="obs-card">
+              <div class="obs-card-header">
+                <span class="obs-card-title">Latency Percentiles (P50, P95, P99)</span>
+                <span class="obs-card-subtitle">Reservoir sampled end-to-end response time</span>
+              </div>
+              <canvas id="chart-latency" style="width: 100%; height: 160px;"></canvas>
+            </div>
+
+            <div class="obs-card">
+              <div class="obs-card-header">
+                <span class="obs-card-title">Simulated Infrastructure Cost ($/hr)</span>
+                <span class="obs-card-subtitle">Real-time memory, compute, and DB query costs</span>
+              </div>
+              <canvas id="chart-cost" style="width: 100%; height: 160px;"></canvas>
+            </div>
+          </div>
+
+          <!-- Live Decision Feed -->
+          <div class="obs-card">
+            <div class="obs-card-header">
+              <span class="obs-card-title">Live Causal Decision & System Event Feed</span>
+              <span class="badge badge-neutral">Autonomous Runtime Log</span>
+            </div>
+            <div id="live-decision-feed-list" class="feed-container">
+              <!-- Events populated live -->
+            </div>
+          </div>
+        </section>
+
+        <!-- =================================================================
+             TAB 2: LIVE SIMULATION & WORKLOAD CONTROLLER
+             ================================================================= -->
+        <section id="view-live-sim" class="view-panel">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h2>Live Workload Simulator & Traffic Controller</h2>
+              <p>Control request distributions, scenario states, traffic rates, and hardware capacities.</p>
+            </div>
+          </div>
+
+          <div class="grid-main-side">
+            <div style="display: flex; flex-direction: column; gap: 16px;">
+              <!-- Workload Type Selection -->
+              <div class="obs-card">
+                <div class="obs-card-header">
+                  <span class="obs-card-title">1. Workload Architecture Type</span>
+                  <span class="obs-card-subtitle">Adapts data profile, size skew, and recompute penalties</span>
+                </div>
+                <div style="display: flex; gap: 12px; margin-top: 6px;">
+                  <button class="btn btn-primary workload-btn active" data-workload="READ_HEAVY_API" style="flex: 1; padding: 12px; text-align: left; flex-direction: column; align-items: flex-start;">
+                    <div style="font-size: 14px; font-weight: 700;">[ Read-Heavy API Service ]</div>
+                    <div class="text-xs" style="opacity: 0.85; margin-top: 4px;">High repeat reads, steep Zipfian skew, moderate DB query costs (30-180ms).</div>
+                  </button>
+                  <button class="btn btn-outline workload-btn" data-workload="COMPUTE_HEAVY_REC" style="flex: 1; padding: 12px; text-align: left; flex-direction: column; align-items: flex-start;">
+                    <div style="font-size: 14px; font-weight: 700;">[ Compute-Heavy Recommendation ]</div>
+                    <div class="text-xs" style="opacity: 0.85; margin-top: 4px;">ML embedding inference, complex graph recomputation, expensive latency penalties (160-600ms).</div>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Traffic Scenarios -->
+              <div class="obs-card">
+                <div class="obs-card-header">
+                  <span class="obs-card-title">2. Traffic Scenario Triggers</span>
+                  <span class="obs-card-subtitle">Inject dynamic operational conditions into the active simulator</span>
+                </div>
+                <div class="grid-3" style="margin-top: 6px;">
+                  <button class="btn btn-outline scenario-btn active" data-scenario="STEADY" style="flex-direction: column; padding: 10px; text-align: left; align-items: flex-start;">
+                    <div class="font-bold">1. Steady Load</div>
+                    <div class="text-xs text-muted">Equilibrium traffic</div>
+                  </button>
+                  <button class="btn btn-outline scenario-btn" data-scenario="POPULARITY_SPIKE" style="flex-direction: column; padding: 10px; text-align: left; align-items: flex-start;">
+                    <div class="font-bold text-warning">2. Popularity Spike</div>
+                    <div class="text-xs text-muted">45x surge on single item</div>
+                  </button>
+                  <button class="btn btn-outline scenario-btn" data-scenario="GRADUAL_SHIFT" style="flex-direction: column; padding: 10px; text-align: left; align-items: flex-start;">
+                    <div class="font-bold">3. Gradual Shift</div>
+                    <div class="text-xs text-muted">Dynamic cluster drift</div>
+                  </button>
+                  <button class="btn btn-outline scenario-btn" data-scenario="COLD_START" style="flex-direction: column; padding: 10px; text-align: left; align-items: flex-start;">
+                    <div class="font-bold text-danger">4. Cold Start</div>
+                    <div class="text-xs text-muted">Wipes cache & self-warms</div>
+                  </button>
+                  <button class="btn btn-outline scenario-btn" data-scenario="TRAFFIC_BURST" style="flex-direction: column; padding: 10px; text-align: left; align-items: flex-start;">
+                    <div class="font-bold text-info">5. Traffic Burst</div>
+                    <div class="text-xs text-muted">3.8x system-wide surge</div>
+                  </button>
+                  <button class="btn btn-outline scenario-btn" data-scenario="CACHE_POLLUTION" style="flex-direction: column; padding: 10px; text-align: left; align-items: flex-start;">
+                    <div class="font-bold text-danger">6. Cache Pollution</div>
+                    <div class="text-xs text-muted">Unique key flood test</div>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Database & Memory Observability Charts -->
+              <div class="grid-2">
+                <div class="obs-card">
+                  <div class="obs-card-header">
+                    <span class="obs-card-title">Backend & DB CPU (%)</span>
+                  </div>
+                  <canvas id="chart-backend-db" style="width: 100%; height: 150px;"></canvas>
+                </div>
+                <div class="obs-card">
+                  <div class="obs-card-header">
+                    <span class="obs-card-title">Cache Memory Footprint (MB)</span>
+                  </div>
+                  <canvas id="chart-memory-occupancy" style="width: 100%; height: 150px;"></canvas>
+                </div>
+              </div>
+            </div>
+
+            <!-- Parameters Side Panel -->
+            <div style="display: flex; flex-direction: column; gap: 16px;">
+              <div class="obs-card">
+                <div class="obs-card-header">
+                  <span class="obs-card-title">Simulation Parameters</span>
+                </div>
+                
+                <div class="form-group">
+                  <div class="form-label">
+                    <span>Base Traffic Volume</span>
+                    <span id="slider-rps-val" class="font-mono text-info">250 req/s</span>
+                  </div>
+                  <input id="slider-rps" type="range" min="20" max="2500" step="10" value="250">
+                </div>
+
+                <div class="form-group" style="margin-top: 10px;">
+                  <div class="form-label">
+                    <span>Cache Capacity Provisioning</span>
+                  </div>
+                  <select id="select-cache-capacity" class="form-control">
+                    <option value="0.5">512 MB (High Pressure)</option>
+                    <option value="1">1.0 GB</option>
+                    <option value="2" selected>2.0 GB (Baseline)</option>
+                    <option value="4">4.0 GB</option>
+                    <option value="8">8.0 GB (Over-provisioned)</option>
+                  </select>
+                </div>
+
+                <div class="form-group" style="margin-top: 10px;">
+                  <div class="form-label">
+                    <span>Simulation Speed Multiplier</span>
+                  </div>
+                  <div class="btn-group" style="width: 100%;">
+                    <button class="btn btn-outline speed-btn active" data-speed="1" style="flex: 1;">1x</button>
+                    <button class="btn btn-outline speed-btn" data-speed="2" style="flex: 1;">2x</button>
+                    <button class="btn btn-outline speed-btn" data-speed="5" style="flex: 1;">5x</button>
+                    <button class="btn btn-outline speed-btn" data-speed="10" style="flex: 1;">10x</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="obs-card">
+                <div class="obs-card-header">
+                  <span class="obs-card-title">Causal Validation Rules</span>
+                </div>
+                <ul class="text-xs text-muted" style="display: flex; flex-direction: column; gap: 6px; padding-left: 16px;">
+                  <li>Increasing traffic directly increases DB queries and CPU if cache misses occur.</li>
+                  <li>Popularity spikes extend dynamic TTL and increase hit rates.</li>
+                  <li>Cold starts trigger high miss stampedes, escalating latency and DB queue depth.</li>
+                  <li>Every displayed metric has a direct mathematical dependency on the active workload.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- =================================================================
+             TAB 3: CACHE OBJECTS EXPLORER
+             ================================================================= -->
+        <section id="view-objects" class="view-panel">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h2>Cache Memory Inspector & Decision Catalog</h2>
+              <p>Inspect every cached object in memory. Click any row to view full multi-factor formula decomposition.</p>
+            </div>
+            <div style="display: flex; gap: 10px; align-items: center;">
+              <input id="objects-search-input" type="text" class="form-control" placeholder="Search by Key, Name, or Category..." style="width: 240px;">
+              <div class="btn-group">
+                <button class="btn btn-sm btn-outline objects-filter-btn active" data-filter="all">All</button>
+                <button class="btn btn-sm btn-outline objects-filter-btn" data-filter="RETAIN">Retain</button>
+                <button class="btn btn-sm btn-outline objects-filter-btn" data-filter="REFRESH">Refresh</button>
+                <button class="btn btn-sm btn-outline objects-filter-btn" data-filter="EVICT">Evict</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="table-container">
+            <table class="obs-table">
+              <thead>
+                <tr>
+                  <th>Object ID</th>
+                  <th>Name / Category</th>
+                  <th>Size</th>
+                  <th>Recent Access</th>
+                  <th>DB Retrieval</th>
+                  <th>Dynamic TTL (Old ➔ New)</th>
+                  <th>Value Score</th>
+                  <th>Decision</th>
+                  <th>Explainable Rationale</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="objects-table-body">
+                <!-- Populated dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- =================================================================
+             TAB 4: DECISION ENGINE & SCORING LAB
+             ================================================================= -->
+        <section id="view-decision-engine" class="view-panel">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h2>Multi-Factor Decision Engine & Scoring Lab</h2>
+              <p>Interactive mathematical model calculating object value scores across 8 normalized dimensions.</p>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer;">
+                <input id="toggle-auto-weights" type="checkbox" checked>
+                <span class="font-bold">Auto-Adapt Weights to Workload</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="grid-main-side">
+            <div style="display: flex; flex-direction: column; gap: 16px;">
+              <!-- Formula Explanation Card -->
+              <div class="obs-card">
+                <div class="obs-card-header">
+                  <span class="obs-card-title">Mathematical Formulation</span>
+                  <span class="badge badge-info">Normalized Multi-Factor Scoring</span>
+                </div>
+                <div class="formula-box" style="font-size: 13px; line-height: 1.8;">
+                  <code>
+                    <strong>Object Value Score</strong> = <br>
+                    &nbsp;&nbsp;+ (W<sub>f</sub> × Frequency Score) + (W<sub>r</sub> × Recency Score) + (W<sub>p</sub> × Popularity Score)<br>
+                    &nbsp;&nbsp;+ (W<sub>c</sub> × Retrieval Cost) + (W<sub>fresh</sub> × Freshness) + (W<sub>t</sub> × Trend Score)<br>
+                    &nbsp;&nbsp;+ (W<sub>v</sub> × Reuse Probability) - (W<sub>s</sub> × Size Penalty)
+                  </code>
+                </div>
+                <div class="text-xs text-muted" style="margin-top: 4px;">
+                  All individual factor scores are normalized to [0.0, 1.0]. Weights adapt dynamically when switching between Read-Heavy API (prioritizes frequency & popularity) and Compute-Heavy Recommendation (prioritizes recomputation cost & reuse probability).
+                </div>
+              </div>
+
+              <!-- Decision Logic Documentation -->
+              <div class="grid-3">
+                <div class="obs-card" style="border-top: 3px solid var(--color-success);">
+                  <div class="font-bold text-success" style="font-size: 14px;">RETAIN</div>
+                  <div class="text-xs text-muted" style="margin-top: 6px;">
+                    Assigned when composite Score ≥ 0.40 and object is fresh. Value derived from high frequency or expensive retrieval outweighs memory footprint.
+                  </div>
+                </div>
+                <div class="obs-card" style="border-top: 3px solid var(--color-warning);">
+                  <div class="font-bold text-warning" style="font-size: 14px;">REFRESH</div>
+                  <div class="text-xs text-muted" style="margin-top: 6px;">
+                    Assigned when Score ≥ 0.45 but object age reaches ≥ 75% of TTL. Background pre-fetch is dispatched asynchronously before miss occurs.
+                  </div>
+                </div>
+                <div class="obs-card" style="border-top: 3px solid var(--color-danger);">
+                  <div class="font-bold text-danger" style="font-size: 14px;">EVICT</div>
+                  <div class="text-xs text-muted" style="margin-top: 6px;">
+                    Assigned when Score &lt; 0.40 or low reuse probability makes the object a poor use of cache capacity under memory pressure.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Interactive Weight Sliders -->
+            <div class="obs-card">
+              <div class="obs-card-header">
+                <span class="obs-card-title">Scoring Weights (W<sub>i</sub>)</span>
+              </div>
+              
+              <div class="form-group">
+                <div class="form-label"><span>W_f (Frequency)</span><span id="val-w-frequency" class="font-mono text-info">0.25</span></div>
+                <input id="slider-w-frequency" type="range" min="0" max="1" step="0.05" value="0.25">
+              </div>
+
+              <div class="form-group">
+                <div class="form-label"><span>W_r (Recency)</span><span id="val-w-recency" class="font-mono text-info">0.20</span></div>
+                <input id="slider-w-recency" type="range" min="0" max="1" step="0.05" value="0.20">
+              </div>
+
+              <div class="form-group">
+                <div class="form-label"><span>W_p (Popularity)</span><span id="val-w-popularity" class="font-mono text-info">0.20</span></div>
+                <input id="slider-w-popularity" type="range" min="0" max="1" step="0.05" value="0.20">
+              </div>
+
+              <div class="form-group">
+                <div class="form-label"><span>W_c (Retrieval Cost)</span><span id="val-w-retrievalCost" class="font-mono text-info">0.15</span></div>
+                <input id="slider-w-retrievalCost" type="range" min="0" max="1" step="0.05" value="0.15">
+              </div>
+
+              <div class="form-group">
+                <div class="form-label"><span>W_fresh (Freshness)</span><span id="val-w-freshness" class="font-mono text-info">0.15</span></div>
+                <input id="slider-w-freshness" type="range" min="0" max="1" step="0.05" value="0.15">
+              </div>
+
+              <div class="form-group">
+                <div class="form-label"><span>W_t (Trend Velocity)</span><span id="val-w-trend" class="font-mono text-info">0.10</span></div>
+                <input id="slider-w-trend" type="range" min="0" max="1" step="0.05" value="0.10">
+              </div>
+
+              <div class="form-group">
+                <div class="form-label"><span>W_v (Reuse Probability)</span><span id="val-w-reuseProbability" class="font-mono text-info">0.10</span></div>
+                <input id="slider-w-reuseProbability" type="range" min="0" max="1" step="0.05" value="0.10">
+              </div>
+
+              <div class="form-group">
+                <div class="form-label"><span>W_s (Size Penalty)</span><span id="val-w-sizePenalty" class="font-mono text-danger">0.15</span></div>
+                <input id="slider-w-sizePenalty" type="range" min="0" max="1" step="0.05" value="0.15">
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- =================================================================
+             TAB 5: STRATEGY BATTLE
+             ================================================================= -->
+        <section id="view-battle" class="view-panel">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h2>Cache Strategy Battle: Smart Cache vs LRU vs LFU vs GDS</h2>
+              <p>Side-by-side object-level decision comparison showing how each algorithm evaluates identical resident items.</p>
+            </div>
+          </div>
+
+          <div class="grid-4">
+            <div class="obs-card">
+              <div class="font-bold text-info">LRU (Least Recently Used)</div>
+              <div class="text-xs text-muted" style="margin-top: 4px;">Optimizes solely for recency. Vulnerable to one-hit-wonder scans and evicts expensive-to-compute cold items prematurely.</div>
+            </div>
+            <div class="obs-card">
+              <div class="font-bold text-warning">LFU (Least Frequently Used)</div>
+              <div class="text-xs text-muted" style="margin-top: 4px;">Optimizes solely for historical hit count. Suffers from cache pollution from stale legacy objects with high historical counts.</div>
+            </div>
+            <div class="obs-card">
+              <div class="font-bold">GDS (Greedy Dual-Size)</div>
+              <div class="text-xs text-muted" style="margin-top: 4px;">Optimizes for Cost/Size ratio with inflation clock L. Misses dynamic traffic trends and temporal freshness constraints.</div>
+            </div>
+            <div class="obs-card" style="border: 1px solid var(--color-success-border);">
+              <div class="font-bold text-success">Smart Cache (Adaptive)</div>
+              <div class="text-xs text-muted" style="margin-top: 4px;">Holistically balances Frequency, Recency, Size, DB Latency, Staleness, and Trend with dynamic TTL recalibration.</div>
+            </div>
+          </div>
+
+          <div class="table-container" style="margin-top: 10px;">
+            <table class="obs-table">
+              <thead>
+                <tr>
+                  <th>Object ID</th>
+                  <th>Name</th>
+                  <th>Size</th>
+                  <th>DB Latency</th>
+                  <th>LRU Action</th>
+                  <th>LFU Action</th>
+                  <th>GDS Action</th>
+                  <th>Smart Cache Decision</th>
+                  <th>Why Smart Cache Wins</th>
+                </tr>
+              </thead>
+              <tbody id="battle-table-body">
+                <!-- Populated dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- =================================================================
+             TAB 6: BENCHMARK LAB (DIGITAL TWIN)
+             ================================================================= -->
+        <section id="view-benchmark" class="view-panel">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h2>Digital Twin Benchmark Lab</h2>
+              <p>Synchronously benchmarks identical workload request streams across all 4 cache implementations.</p>
+            </div>
+            <div style="display: flex; gap: 10px; align-items: center;">
+              <select id="select-benchmark-scenario" class="form-control">
+                <option value="STEADY">Steady Load Scenario</option>
+                <option value="POPULARITY_SPIKE">Popularity Spike Scenario</option>
+                <option value="GRADUAL_SHIFT">Gradual Shift Scenario</option>
+                <option value="TRAFFIC_BURST">Traffic Burst Scenario</option>
+                <option value="CACHE_POLLUTION">Cache Pollution Attack Scenario</option>
+              </select>
+              <button id="btn-run-benchmark" class="btn btn-primary">
+                🔬 Run Digital Twin Benchmark
+              </button>
+            </div>
+          </div>
+
+          <div id="benchmark-advantage-summary" class="obs-card" style="border-left: 4px solid var(--color-success); background: var(--bg-surface-secondary);">
+            <!-- Advantage statement populated here -->
+          </div>
+
+          <div class="table-container" style="margin-top: 10px;">
+            <table class="obs-table">
+              <thead>
+                <tr>
+                  <th>Benchmark Metric</th>
+                  <th>Smart Cache (Adaptive)</th>
+                  <th>LRU (Least Recently Used)</th>
+                  <th>LFU (Least Frequently Used)</th>
+                  <th>GDS (Greedy Dual Size)</th>
+                </tr>
+              </thead>
+              <tbody id="benchmark-matrix-body">
+                <!-- Populated dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- =================================================================
+             TAB 7: COST & ADAPTIVE SCALING
+             ================================================================= -->
+        <section id="view-cost-scaling" class="view-panel">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h2>Simulated Infrastructure Cost Model & Adaptive Scaling</h2>
+              <p>Transparent cost calculation and ROI-driven cache capacity scaling decision engine.</p>
+            </div>
+          </div>
+
+          <div class="grid-main-side">
+            <div style="display: flex; flex-direction: column; gap: 16px;">
+              <!-- Cost Breakdown Cards -->
+              <div class="grid-3">
+                <div class="obs-card">
+                  <div class="text-xs text-muted">Total Simulated Cost</div>
+                  <div id="cost-tab-total" class="font-mono text-2xl font-bold" style="margin-top: 4px;">$0.248/hr</div>
+                  <div class="text-xs text-muted" style="margin-top: 4px;">Active hourly infrastructure spend</div>
+                </div>
+                <div class="obs-card">
+                  <div class="text-xs text-muted">Net Cost Savings</div>
+                  <div id="cost-tab-savings" class="font-mono text-2xl font-bold text-success" style="margin-top: 4px;">$0.622/hr (71%)</div>
+                  <div class="text-xs text-muted" style="margin-top: 4px;">Versus naive uncached DB architecture</div>
+                </div>
+                <div class="obs-card">
+                  <div class="text-xs text-muted">Uncached Baseline</div>
+                  <div id="cost-tab-uncached" class="font-mono text-2xl font-bold text-dim" style="margin-top: 4px;">$0.870/hr</div>
+                  <div class="text-xs text-muted" style="margin-top: 4px;">Hypothetical 100% DB miss load</div>
+                </div>
+              </div>
+
+              <!-- Cost Formula Breakdown Table -->
+              <div class="obs-card">
+                <div class="obs-card-header">
+                  <span class="obs-card-title">Detailed Cost Formula Decomposition</span>
+                  <span class="badge badge-info">Hourly Operational Rates</span>
+                </div>
+                <table class="obs-table">
+                  <thead>
+                    <tr>
+                      <th>Infrastructure Component</th>
+                      <th>Rate Metric</th>
+                      <th>Simulated Rate</th>
+                      <th>Current Hourly Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>Cache Memory Allocation</td>
+                      <td>$0.040 / GB-hr</td>
+                      <td>2.0 GB Allocated</td>
+                      <td id="cost-tab-cache-mem" class="font-mono text-info font-bold">$0.080/hr</td>
+                    </tr>
+                    <tr>
+                      <td>Backend Compute Cores</td>
+                      <td>$0.055 / Core-hr</td>
+                      <td>3.5 Cores Utilized</td>
+                      <td id="cost-tab-backend-comp" class="font-mono text-warning font-bold">$0.112/hr</td>
+                    </tr>
+                    <tr>
+                      <td>Database / API Queries</td>
+                      <td>$0.015 / 10k Queries</td>
+                      <td>37,400 DB Reads/hr</td>
+                      <td id="cost-tab-db-ops" class="font-mono text-danger font-bold">$0.056/hr</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Adaptive Capacity Scaling Decision Box -->
+            <div class="obs-card">
+              <div class="obs-card-header">
+                <span class="obs-card-title">Adaptive Scaling Evaluator</span>
+                <span id="scale-box-decision-badge" class="badge badge-retain">SCALE UP</span>
+              </div>
+
+              <div class="formula-box">
+                <div class="formula-row">
+                  <span>Current Cache Capacity:</span>
+                  <span id="scale-box-current-cap" class="font-bold">2.0 GB</span>
+                </div>
+                <div class="formula-row">
+                  <span>Proposed Capacity Tier:</span>
+                  <span id="scale-box-proposed-cap" class="font-bold">4.0 GB</span>
+                </div>
+                <div class="formula-row">
+                  <span class="text-danger">Additional Cache Cost:</span>
+                  <span id="scale-box-add-cost" class="text-danger font-bold">+$0.080/hr</span>
+                </div>
+                <div class="formula-row">
+                  <span class="text-success">Expected Backend Saving:</span>
+                  <span id="scale-box-exp-saving" class="text-success font-bold">+$0.210/hr</span>
+                </div>
+                <div class="formula-row">
+                  <span>Net Benefit (ROI):</span>
+                  <span id="scale-box-net-benefit" class="text-success font-bold">+0.130/hr</span>
+                </div>
+              </div>
+
+              <div style="font-size: 12px; color: var(--text-secondary); margin-top: 10px;">
+                <strong>Scaling Logic:</strong>
+                <p id="scale-box-reason" class="text-xs text-muted" style="margin-top: 4px;">
+                  Positive ROI: Scaling from 2GB to 4GB yields net savings by reducing DB/compute load.
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- =================================================================
+             TAB 8: DATABASE & BACKEND OBSERVABILITY
+             ================================================================= -->
+        <section id="view-database" class="view-panel">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h2>Database & Application Backend Observability</h2>
+              <p>Simulated relational database and compute thread pool telemetry responding to cache hit/miss ratio.</p>
+            </div>
+          </div>
+
+          <div class="grid-3">
+            <div class="obs-card">
+              <div class="text-xs text-muted">Database CPU Utilization</div>
+              <div id="db-tab-cpu" class="font-mono text-2xl font-bold text-warning" style="margin-top: 4px;">28%</div>
+              <div class="text-xs text-muted" style="margin-top: 4px;">16-core simulated database instance</div>
+            </div>
+            <div class="obs-card">
+              <div class="text-xs text-muted">Database Query Latency</div>
+              <div id="db-tab-latency" class="font-mono text-2xl font-bold text-danger" style="margin-top: 4px;">45 ms</div>
+              <div class="text-xs text-muted" style="margin-top: 4px;">Base disk/API fetch + queue backpressure</div>
+            </div>
+            <div class="obs-card">
+              <div class="text-xs text-muted">Active Connection Pool</div>
+              <div id="db-tab-connections" class="font-mono text-2xl font-bold text-info" style="margin-top: 4px;">24 / 100</div>
+              <div class="text-xs text-muted" style="margin-top: 4px;">Concurrent query threads active</div>
+            </div>
+          </div>
+
+          <div class="grid-3" style="margin-top: 10px;">
+            <div class="obs-card">
+              <div class="text-xs text-muted">Database Miss Queries / Sec</div>
+              <div id="db-tab-qps" class="font-mono text-2xl font-bold" style="margin-top: 4px;">34 QPS</div>
+            </div>
+            <div class="obs-card">
+              <div class="text-xs text-muted">Backend Application Load</div>
+              <div id="db-tab-backend-load" class="font-mono text-2xl font-bold text-info" style="margin-top: 4px;">22%</div>
+            </div>
+            <div class="obs-card">
+              <div class="text-xs text-muted">Worker Thread Pool</div>
+              <div id="db-tab-active-threads" class="font-mono text-2xl font-bold" style="margin-top: 4px;">14 / 64</div>
+            </div>
+          </div>
+
+          <div class="obs-card" style="margin-top: 10px;">
+            <div class="obs-card-header">
+              <span class="obs-card-title">Causal Relationship Model</span>
+            </div>
+            <div class="text-xs text-muted" style="line-height: 1.8;">
+              When the cache hit rate improves (e.g. from 40% to 88%), database query volume drops proportionally. Consequently, DB connection pool utilization shrinks from 85% to 24%, DB CPU decreases from 72% to 28%, and query queue latency drops from 180ms to 45ms.
+            </div>
+          </div>
+        </section>
+
+        <!-- =================================================================
+             TAB 9: CACHE TIME MACHINE
+             ================================================================= -->
+        <section id="view-timemachine" class="view-panel">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h2>Cache Time Machine & Counterfactual Replay</h2>
+              <p>Replay historical simulation moments and compare counterfactual performance against traditional algorithms.</p>
+            </div>
+          </div>
+
+          <div class="grid-main-side">
+            <!-- Counterfactual Inspection Panel -->
+            <div id="timemachine-detail-panel">
+              <!-- Populated dynamically -->
+            </div>
+
+            <!-- Historical Snapshots List -->
+            <div class="obs-card">
+              <div class="obs-card-header">
+                <span class="obs-card-title">Historical Timeline Snapshots</span>
+              </div>
+              <div id="timemachine-snapshot-list" class="feed-container" style="max-height: 480px;">
+                <!-- Populated dynamically -->
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- =================================================================
+             TAB 10: CACHE POLLUTION DEFENSE
+             ================================================================= -->
+        <section id="view-pollution" class="view-panel">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h2>Cache Pollution Defense System</h2>
+              <p>Detects high-entropy unique key deluges (e.g. web crawlers, scans) and shields high-value cached objects from eviction.</p>
+            </div>
+            <button class="btn btn-danger scenario-btn" data-scenario="CACHE_POLLUTION">
+              ⚡ Trigger Unique Key Attack
+            </button>
+          </div>
+
+          <div class="grid-4">
+            <div class="obs-card">
+              <div class="text-xs text-muted">Pollution Risk Level</div>
+              <div style="margin-top: 6px;"><span id="pollution-tab-risk" class="badge badge-retain" style="font-size: 14px; padding: 4px 10px;">LOW</span></div>
+            </div>
+            <div class="obs-card">
+              <div class="text-xs text-muted">Unique Key Rate</div>
+              <div id="pollution-tab-unique-rate" class="font-mono text-2xl font-bold" style="margin-top: 4px;">12%</div>
+            </div>
+            <div class="obs-card">
+              <div class="text-xs text-muted">Useful Cache Occupancy</div>
+              <div id="pollution-tab-useful-occupancy" class="font-mono text-2xl font-bold text-success" style="margin-top: 4px;">85%</div>
+            </div>
+            <div class="obs-card">
+              <div class="text-xs text-muted">Shielded Resident Items</div>
+              <div id="pollution-tab-protected-count" class="font-mono text-2xl font-bold text-info" style="margin-top: 4px;">28 items</div>
+            </div>
+          </div>
+
+          <div class="obs-card" style="margin-top: 10px; border-left: 4px solid var(--color-info);">
+            <div class="obs-card-title">Defense Policy Status</div>
+            <div id="pollution-tab-explanation" class="text-xs text-secondary" style="margin-top: 4px;">
+              Normal traffic access patterns. Useful cache occupancy is optimal.
+            </div>
+          </div>
+        </section>
+
+        <!-- =================================================================
+             TAB 11: SYSTEM ARCHITECTURE
+             ================================================================= -->
+        <section id="view-architecture" class="view-panel">
+          <div class="view-header">
+            <div class="view-title-group">
+              <h2>System Architecture & Technical Design</h2>
+              <p>End-to-end dataflow pipeline and architectural justification.</p>
+            </div>
+          </div>
+
+          <div class="obs-card">
+            <div class="obs-card-header">
+              <span class="obs-card-title">High-Level Architectural Topology</span>
+            </div>
+            <pre class="font-mono text-xs" style="background: var(--bg-surface-secondary); padding: 18px; border-radius: var(--radius-sm); color: #38bdf8; line-height: 1.6; overflow-x: auto;">
+User / Workload Generator
+        ↓
+API / Application Layer
+        ↓
+Smart Cache Middleware
+        ↓
+Decision / Scoring Engine ───► Dynamic TTL Recalibration
+        ↓
+Redis-like Cache Simulation
+   ┌────┴──────────────────────────┐
+   │                               │
+[ Cache HIT ]                [ Cache MISS ]
+   │                               ↓
+Fast In-Memory Response       Database / Backend Service
+(1.2ms - 4.0ms)                    ↓
+                              Data Retrieval & Recompute
+                                   ↓
+                              Cache Store Update
+                                   ↓
+                              Client Response
+
+Continuous Sidecar Telemetry:
+Traffic Monitor ──► Scoring Engine ──► RETAIN / REFRESH / EVICT ──► Pollution Guard
+Metrics Engine  ──► Latency Reservoirs (P50/P95/P99) ──► Cost Model ──► Adaptive Scaling Advisor
+            </pre>
+          </div>
+
+          <div class="grid-2" style="margin-top: 10px;">
+            <div class="obs-card">
+              <div class="obs-card-title">Why a Hybrid Adaptive Heuristic Model?</div>
+              <div class="text-xs text-muted" style="margin-top: 6px; line-height: 1.8;">
+                A fully black-box ML model (e.g. reinforcement learning or deep neural networks) requires large offline production datasets, introduces non-deterministic inference latency overhead (5-15ms) on the cache lookup critical path, and lacks explainability for system operators.
+                <br><br>
+                This prototype utilizes an <strong>adaptive, multi-factor heuristic model</strong> with runtime weight adaptation. This guarantees sub-millisecond execution, complete mathematical explainability, and deterministic behavior across arbitrary traffic patterns.
+              </div>
+            </div>
+
+            <div class="obs-card">
+              <div class="obs-card-title">Key Innovations vs LRU / LFU / GDS</div>
+              <ul class="text-xs text-muted" style="margin-top: 6px; line-height: 1.8; padding-left: 16px;">
+                <li><strong>Application-Aware:</strong> Adapts factor weights for Read-Heavy vs Compute-Heavy workloads.</li>
+                <li><strong>Dynamic TTL:</strong> Extends TTL on surging hot items; shrinks TTL on volatile mutating items.</li>
+                <li><strong>Proactive Background Refresh:</strong> Refreshes high-value expiring objects before users suffer miss latency penalties.</li>
+                <li><strong>Pollution Defense:</strong> Detects single-use crawler floods and shields core resident memory.</li>
+                <li><strong>Cost-Benefit Scaling:</strong> Scales cache capacity only when expected DB savings exceed memory costs.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+      </main>
+    </div>
+
+    <!-- 4. OBJECT DEEP-DIVE MODAL DRAWER -->
+    <div id="object-drawer-backdrop" class="drawer-backdrop" onclick="window.app.ui.closeObjectDrawer()">
+      <div id="object-drawer-panel" class="drawer-panel" onclick="event.stopPropagation()">
+        <div id="object-drawer-content">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. 5-MINUTE DEMO MODE FLOATING CONTROLLER -->
+    <div id="demo-control-bar">
+      <div>
+        <div id="demo-step-title" class="font-bold text-info" style="font-size: 13px;">Step 1/6: Cold Start</div>
+        <div id="demo-step-narrative" class="text-xs text-muted" style="max-width: 500px; margin-top: 2px;">
+          Initiating automated guided scenario walkthrough...
+        </div>
+      </div>
+      <div style="display: flex; gap: 8px;">
+        <button id="btn-demo-next" class="btn btn-sm btn-outline">Next Step ►</button>
+        <button id="btn-demo-stop" class="btn btn-sm btn-danger">Stop Demo ✕</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Main ES Module Entry Point -->
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

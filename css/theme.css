@@ -1,0 +1,119 @@
+/* ==========================================================================
+   Adaptive Cache Management System - Core Design Tokens & Theme
+   Professional Observability & Infrastructure Engineering Style
+   ========================================================================== */
+
+:root {
+  /* Surface & Background Palette (Deep Obsidian / Graphite) */
+  --bg-app: #090d14;
+  --bg-surface-primary: #0f172a;
+  --bg-surface-secondary: #1e293b;
+  --bg-surface-tertiary: #273549;
+  --bg-surface-elevated: #162032;
+  --bg-surface-hover: #233147;
+
+  /* Crisp Structural Borders */
+  --border-subtle: #1e293b;
+  --border-default: #334155;
+  --border-strong: #475569;
+  --border-accent: #0284c7;
+
+  /* Typography & Text Hierarchy */
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --text-dim: #64748b;
+  --text-link: #38bdf8;
+
+  /* Semantic Observability Colors (Restrained, High-Contrast) */
+  --color-success: #10b981;        /* Emerald: Cache Hit, Scale Up, Cost Savings */
+  --color-success-bg: rgba(16, 185, 129, 0.12);
+  --color-success-border: #059669;
+
+  --color-warning: #f59e0b;        /* Amber: Refresh, Approaching Staleness, Med Risk */
+  --color-warning-bg: rgba(245, 158, 11, 0.12);
+  --color-warning-border: #d97706;
+
+  --color-danger: #ef4444;         /* Rose: Cache Miss, Eviction, High Pollution */
+  --color-danger-bg: rgba(239, 68, 68, 0.12);
+  --color-danger-border: #dc2626;
+
+  --color-info: #0284c7;           /* Sky Blue: Smart Algorithm, Primary Metrics */
+  --color-info-bg: rgba(2, 132, 199, 0.12);
+  --color-info-border: #0369a1;
+
+  --color-accent: #8b5cf6;         /* Purple: ML / Recomputation / Multi-Factor */
+  --color-accent-bg: rgba(139, 92, 246, 0.12);
+
+  /* Fonts */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Consolas', 'Courier New', monospace;
+
+  /* Layout Spacing */
+  --header-height: 56px;
+  --ribbon-height: 48px;
+  --sidebar-width: 250px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+}
+
+/* Base Reset */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+}
+
+/* Common Typography & Code Styles */
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+.text-xs { font-size: 11px; }
+.text-sm { font-size: 12px; }
+.text-base { font-size: 13px; }
+.text-lg { font-size: 15px; font-weight: 600; }
+.text-xl { font-size: 18px; font-weight: 600; }
+.text-2xl { font-size: 22px; font-weight: 700; }
+
+.text-muted { color: var(--text-muted); }
+.text-dim { color: var(--text-dim); }
+.text-success { color: var(--color-success); }
+.text-warning { color: var(--color-warning); }
+.text-danger { color: var(--color-danger); }
+.text-info { color: var(--color-info); }
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-surface-primary);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+}
