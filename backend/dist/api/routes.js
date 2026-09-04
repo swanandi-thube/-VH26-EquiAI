@@ -2,12 +2,21 @@
 /**
  * REST API Routes for ADAPTIVECACHE Platform
  */
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.apiRouter = void 0;
 const express_1 = require("express");
+const multer_1 = __importDefault(require("multer"));
 const controllers_1 = require("../controllers");
 const telemetry_1 = require("../telemetry");
 const repositories_1 = require("../repositories");
+// Configure multer for memory storage (max 50MB per file)
+const upload = (0, multer_1.default)({
+    storage: multer_1.default.memoryStorage(),
+    limits: { fileSize: 50 * 1024 * 1024 },
+});
 exports.apiRouter = (0, express_1.Router)();
 // --- Health Verification ---
 exports.apiRouter.get('/health', (req, res) => controllers_1.healthController.getHealth(req, res));
@@ -40,7 +49,11 @@ exports.apiRouter.get('/cache/decisions', (req, res) => controllers_1.cacheContr
 exports.apiRouter.get('/cache/decisions/:id/explain', (req, res) => controllers_1.cacheController.getDecisionExplanation(req, res));
 // --- Activity Stream & Audit Events ---
 exports.apiRouter.get('/cache/events', (req, res) => controllers_1.cacheController.getEvents(req, res));
-// --- Traffic Lab & Workloads ---
+// --- Traffic Lab & Workload Ingestion ---
+exports.apiRouter.post('/workloads/upload', upload.single('file'), (req, res) => controllers_1.workloadController.uploadWorkload(req, res));
+exports.apiRouter.get('/workloads', (req, res) => controllers_1.workloadController.getWorkloadRuns(req, res));
+exports.apiRouter.get('/workloads/:id', (req, res) => controllers_1.workloadController.getWorkloadRunById(req, res));
+exports.apiRouter.delete('/workloads/:id', (req, res) => controllers_1.workloadController.deleteWorkloadRun(req, res));
 exports.apiRouter.post('/workloads/start', (req, res) => controllers_1.workloadController.startWorkload(req, res));
 exports.apiRouter.post('/workloads/stop', (req, res) => controllers_1.workloadController.stopWorkload(req, res));
 exports.apiRouter.get('/workloads/active', (req, res) => controllers_1.workloadController.getActiveWorkload(req, res));

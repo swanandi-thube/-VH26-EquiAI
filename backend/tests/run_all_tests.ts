@@ -13,9 +13,10 @@ import { predictor } from '../src/engine/predictor';
 import { benchmarkEngine } from '../src/benchmark/engine';
 import { costEngine } from '../src/engine/cost';
 import { cacheService } from '../src/services/cacheService';
-import { requestLogRepository } from '../src/repositories';
+import { requestLogRepository, workloadRepository } from '../src/repositories';
 import { telemetry } from '../src/telemetry';
 import { IOriginDataSource } from '../src/services/originAdapter';
+import { workloadIngestionService } from '../src/services/workloadIngestionService';
 
 let passed = 0;
 let failed = 0;
@@ -226,6 +227,117 @@ async function runTests() {
   assert(updatedSnapshot.cacheHits > initialSnapshot.cacheHits, '8b. Dashboard cacheHits updated from actual requests');
   assert(updatedSnapshot.cacheMisses > initialSnapshot.cacheMisses, '8c. Dashboard cacheMisses updated from actual requests');
   assert(updatedSnapshot.cachedObjectsCount > 0, '8d. Dashboard cachedObjectsCount reflects actual Redis keys');
+
+  // Test 10: Real Workload Ingestion (CSV & JSON Ingestion, Validation, Persistence)
+  console.log('\n--- Test Suite 10: Real Workload Ingestion (Phase 3) ---');
+
+  // 1. Valid CSV Upload
+  const validCsvContent = `timestamp,request_id,object_id,operation,response_size,backend_latency,regeneration_cost,status_code,ttl,content_type,priority,region
+2026-09-04T10:00:00Z,REQ-CSV-01,Product_101,GET,4096,65,70,200,300,application/json,1,us-east
+2026-09-04T10:00:02Z,REQ-CSV-02,Product_102,GET,8192,120,130,200,600,application/json,2,us-east
+2026-09-04T10:00:05Z,REQ-CSV-03,Product_101,GET,4096,65,70,200,300,application/json,1,us-west
+2026-09-04T10:00:10Z,REQ-CSV-04,Product_103,SET,2048,45,50,200,120,application/json,1,eu-central`;
+
+  const validCsvRes = await workloadIngestionService.ingestFile('benchmark_trace.csv', validCsvContent);
+  assert(validCsvRes.summary.status === 'VALIDATED', '1. Valid CSV parsed and marked as VALIDATED');
+  assert(validCsvRes.summary.totalRows === 4, '1b. Valid CSV totalRows is 4');
+  assert(validCsvRes.summary.validRows === 4, '1c. Valid CSV validRows is 4');
+  assert(validCsvRes.summary.rejectedRows === 0, '1d. Valid CSV rejectedRows is 0');
+  assert(validCsvRes.summary.uniqueObjects === 3, '1e. Valid CSV uniqueObjects correctly counted as 3');
+  assert(validCsvRes.summary.timeRange.durationSeconds === 10, '1f. Valid CSV time duration calculated as 10s');
+
+  // 2. Malformed CSV Upload
+  const malformedCsvContent = `timestamp,request_id,object_id,operation,response_size,backend_latency,regeneration_cost,status_code
+2026-09-04T10:00:00Z,REQ-MAL-01,Product_201,GET,4096,65,70,200
+2026-09-04T10:00:02Z,REQ-MAL-02,,GET,8192,120,130,200
+2026-09-04T10:00:05Z,REQ-MAL-03,Product_202,GET,invalid_size,65,70,200
+2026-09-04T10:00:07Z,REQ-MAL-04,Product_203,GET,2048,45,50,invalid_status
+2026-09-04T10:00:09Z,REQ-MAL-05,Product_204,GET,1024,30,35,200`;
+
+  const malformedCsvRes = await workloadIngestionService.ingestFile('malformed_trace.csv', malformedCsvContent);
+  assert(malformedCsvRes.summary.status === 'VALIDATED', '2. Malformed CSV processed with partial valid rows');
+  assert(malformedCsvRes.summary.totalRows === 5, '2b. Malformed CSV detected all 5 rows');
+  assert(malformedCsvRes.summary.validRows === 2, '2c. Malformed CSV extracted exactly 2 valid rows');
+  assert(malformedCsvRes.summary.rejectedRows === 3, '2d. Malformed CSV rejected exactly 3 invalid rows');
+  assert(malformedCsvRes.summary.validationErrors.length === 3, '2e. Validation errors recorded per rejected row');
+  assert(malformedCsvRes.summary.validationErrors.some(e => e.error.includes('object_id')), '2f. Captured missing object_id error');
+
+  // 3. Empty CSV Upload
+  const emptyCsvRes = await workloadIngestionService.ingestFile('empty_trace.csv', '   \n  \n');
+  assert(emptyCsvRes.summary.status === 'FAILED', '3. Empty CSV rejected and status marked as FAILED');
+  assert(emptyCsvRes.summary.validRows === 0, '3b. Empty CSV validRows is 0');
+  assert(emptyCsvRes.summary.validationErrors.length > 0, '3c. Empty file validation error reported');
+
+  // 4. Invalid JSON Upload
+  const invalidJsonContent = `[{"request_id": "REQ-1", "object_id": "Product_1", "timestamp": 1725450000000, `;
+  const invalidJsonRes = await workloadIngestionService.ingestFile('corrupted.json', invalidJsonContent);
+  assert(invalidJsonRes.summary.status === 'FAILED', '4. Invalid JSON syntax detected and marked FAILED');
+  assert(invalidJsonRes.summary.validRows === 0, '4b. Invalid JSON yields 0 valid rows');
+  assert(invalidJsonRes.summary.validationErrors[0].error.includes('JSON'), '4c. JSON syntax error detail captured');
+
+  // 5. Valid JSON Upload
+  const validJsonContent = JSON.stringify([
+    {
+      timestamp: 1725450000000,
+      request_id: 'REQ-JSON-01',
+      object_id: 'Product_301',
+      operation: 'GET',
+      response_size: 5120,
+      backend_latency: 85,
+      regeneration_cost: 90,
+      status_code: 200,
+      priority: 1,
+      region: 'us-east',
+    },
+    {
+      timestamp: 1725450005000,
+      request_id: 'REQ-JSON-02',
+      object_id: 'Product_302',
+      operation: 'GET',
+      response_size: 10240,
+      backend_latency: 140,
+      regeneration_cost: 150,
+      status_code: 200,
+      priority: 2,
+      region: 'eu-west',
+    },
+    {
+      timestamp: 1725450012000,
+      request_id: 'REQ-JSON-03',
+      object_id: 'Product_301',
+      operation: 'GET',
+      response_size: 5120,
+      backend_latency: 85,
+      regeneration_cost: 90,
+      status_code: 200,
+      priority: 1,
+      region: 'us-east',
+    },
+  ]);
+
+  const validJsonRes = await workloadIngestionService.ingestFile('api_trace.json', validJsonContent);
+  assert(validJsonRes.summary.status === 'VALIDATED', '5. Valid JSON parsed and marked as VALIDATED');
+  assert(validJsonRes.summary.validRows === 3, '5b. Valid JSON validRows is 3');
+  assert(validJsonRes.summary.rejectedRows === 0, '5c. Valid JSON rejectedRows is 0');
+  assert(validJsonRes.summary.uniqueObjects === 2, '5d. Valid JSON uniqueObjects is 2');
+  assert(validJsonRes.summary.timeRange.durationSeconds === 12, '5e. Valid JSON time duration calculated as 12s');
+
+  // 6. Verify Records Appear in Database / Repositories & History is Preserved
+  const allHistoricalRuns = await workloadRepository.getAllWorkloadRuns();
+  assert(allHistoricalRuns.length >= 4, `6a. All historical workload runs preserved in database (got ${allHistoricalRuns.length})`);
+  
+  const fetchedCsvRequests = await workloadRepository.getWorkloadRequests(validCsvRes.summary.workloadId);
+  assert(fetchedCsvRequests.length === 4, `6b. Stored CSV requests retrieved successfully from repository (got ${fetchedCsvRequests.length})`);
+  assert(fetchedCsvRequests[0].objectId === 'Product_101', '6c. First CSV record object_id verified');
+  assert(fetchedCsvRequests[1].backendLatencyMs === 120, '6d. Second CSV record backend_latency verified');
+
+  const fetchedJsonRequests = await workloadRepository.getWorkloadRequests(validJsonRes.summary.workloadId);
+  assert(fetchedJsonRequests.length === 3, `6e. Stored JSON requests retrieved successfully from repository (got ${fetchedJsonRequests.length})`);
+  assert(fetchedJsonRequests[0].region === 'us-east', '6f. Stored optional field "region" preserved');
+
+  const retrievedRun = await workloadRepository.getWorkloadRunById(validJsonRes.summary.workloadId);
+  assert(retrievedRun !== null, '6g. Workload metadata record retrieved by ID');
+  assert(retrievedRun?.filename === 'api_trace.json', '6h. Workload filename matches ingested file');
 
   console.log('\n========================================================');
   console.log(`  TEST RESULTS: ${passed} PASSED, ${failed} FAILED`);

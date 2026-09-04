@@ -63,6 +63,62 @@ export const apiClient = {
     return json.data;
   },
 
+  async uploadWorkload(
+    formData: FormData,
+    onProgress?: (percent: number) => void
+  ): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${API_BASE}/workloads/upload`);
+
+      if (onProgress && xhr.upload) {
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const percent = Math.round((event.loaded / event.total) * 100);
+            onProgress(percent);
+          }
+        };
+      }
+
+      xhr.onload = () => {
+        try {
+          const json = JSON.parse(xhr.responseText);
+          if (xhr.status >= 200 && xhr.status < 300 && json.success) {
+            resolve(json.data);
+          } else {
+            reject(new Error(json.message || `Upload failed with status ${xhr.status}`));
+          }
+        } catch (e: any) {
+          reject(new Error(`Failed to parse response: ${xhr.responseText}`));
+        }
+      };
+
+      xhr.onerror = () => {
+        reject(new Error('Network error during workload upload.'));
+      };
+
+      xhr.send(formData);
+    });
+  },
+
+  async getWorkloadRuns(limit = 50): Promise<any[]> {
+    const res = await fetch(`${API_BASE}/workloads?limit=${limit}`);
+    const json = await res.json();
+    return json.data;
+  },
+
+  async getWorkloadRunById(id: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/workloads/${id}`);
+    const json = await res.json();
+    return json.data;
+  },
+
+  async deleteWorkloadRun(id: string): Promise<boolean> {
+    const res = await fetch(`${API_BASE}/workloads/${id}`, { method: 'DELETE' });
+    const json = await res.json();
+    return json.success;
+  },
+
   async startWorkload(config: WorkloadConfig): Promise<WorkloadRun> {
     const res = await fetch(`${API_BASE}/workloads/start`, {
       method: 'POST',

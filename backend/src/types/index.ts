@@ -181,6 +181,60 @@ export interface WorkloadConfig {
   hotspotRatio?: number; // e.g. 0.2 means 20% of keys get 80% of traffic (Zipfian)
 }
 
+export interface WorkloadRequestRecord {
+  requestId: string;
+  timestamp: number;
+  objectId: string;
+  operation: 'GET' | 'SET' | 'INVALIDATE' | 'PUT' | 'DELETE' | string;
+  responseSizeBytes: number;
+  backendLatencyMs: number;
+  regenerationCostMs: number;
+  statusCode: number;
+  ttl?: number | null;
+  contentType?: string | null;
+  priority?: number | null;
+  region?: string | null;
+}
+
+export interface WorkloadValidationError {
+  row: number;
+  error: string;
+  raw?: any;
+}
+
+export interface WorkloadUploadSummary {
+  workloadId: string;
+  workload_id?: string;
+  filename: string;
+  fileType: 'CSV' | 'JSON' | string;
+  file_type?: 'CSV' | 'JSON' | string;
+  fileSizeBytes: number;
+  file_size_bytes?: number;
+  totalRows: number;
+  total_rows?: number;
+  validRows: number;
+  valid_rows?: number;
+  rejectedRows: number;
+  rejected_rows?: number;
+  uniqueObjects: number;
+  unique_objects?: number;
+  timeRange: {
+    start: number;
+    end: number;
+    durationSeconds: number;
+  };
+  time_range?: {
+    start: number;
+    end: number;
+    durationSeconds: number;
+  };
+  status: 'VALIDATED' | 'READY' | 'FAILED' | string;
+  validationErrors: WorkloadValidationError[];
+  validation_errors?: WorkloadValidationError[];
+  uploadedAt: number;
+  uploaded_at?: number;
+}
+
 export interface WorkloadRun {
   id: string;
   config: WorkloadConfig;

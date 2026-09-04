@@ -3,6 +3,7 @@
  */
 
 import { Router, Request, Response } from 'express';
+import multer from 'multer';
 import {
   healthController,
   cacheController,
@@ -15,6 +16,12 @@ import {
 } from '../controllers';
 import { telemetry } from '../telemetry';
 import { requestLogRepository } from '../repositories';
+
+// Configure multer for memory storage (max 50MB per file)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 },
+});
 
 export const apiRouter = Router();
 
@@ -55,7 +62,11 @@ apiRouter.get('/cache/decisions/:id/explain', (req: Request, res: Response) => c
 // --- Activity Stream & Audit Events ---
 apiRouter.get('/cache/events', (req: Request, res: Response) => cacheController.getEvents(req, res));
 
-// --- Traffic Lab & Workloads ---
+// --- Traffic Lab & Workload Ingestion ---
+apiRouter.post('/workloads/upload', upload.single('file'), (req: Request, res: Response) => workloadController.uploadWorkload(req, res));
+apiRouter.get('/workloads', (req: Request, res: Response) => workloadController.getWorkloadRuns(req, res));
+apiRouter.get('/workloads/:id', (req: Request, res: Response) => workloadController.getWorkloadRunById(req, res));
+apiRouter.delete('/workloads/:id', (req: Request, res: Response) => workloadController.deleteWorkloadRun(req, res));
 apiRouter.post('/workloads/start', (req: Request, res: Response) => workloadController.startWorkload(req, res));
 apiRouter.post('/workloads/stop', (req: Request, res: Response) => workloadController.stopWorkload(req, res));
 apiRouter.get('/workloads/active', (req: Request, res: Response) => workloadController.getActiveWorkload(req, res));

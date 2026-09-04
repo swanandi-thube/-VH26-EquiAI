@@ -116,6 +116,52 @@ export class MigrationRunner {
         CREATE INDEX IF NOT EXISTS idx_system_events_time ON system_events(timestamp DESC);
       `);
 
+      // 7. workload_runs table (Historical custom uploaded workloads & synthetic runs)
+      await dbClient.query(`
+        CREATE TABLE IF NOT EXISTS workload_runs (
+          id VARCHAR(64) PRIMARY KEY,
+          filename VARCHAR(255) NOT NULL,
+          file_type VARCHAR(16) NOT NULL,
+          file_size_bytes BIGINT NOT NULL DEFAULT 0,
+          total_rows INT NOT NULL DEFAULT 0,
+          valid_rows INT NOT NULL DEFAULT 0,
+          rejected_rows INT NOT NULL DEFAULT 0,
+          unique_objects INT NOT NULL DEFAULT 0,
+          start_time BIGINT,
+          end_time BIGINT,
+          duration_seconds INT DEFAULT 0,
+          status VARCHAR(32) NOT NULL DEFAULT 'VALIDATED',
+          validation_errors JSONB DEFAULT '[]'::jsonb,
+          uploaded_at BIGINT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_workload_runs_time ON workload_runs(uploaded_at DESC);
+      `);
+
+      // 8. workload_requests table (Individual request rows inside custom workloads)
+      await dbClient.query(`
+        CREATE TABLE IF NOT EXISTS workload_requests (
+          id BIGSERIAL PRIMARY KEY,
+          workload_id VARCHAR(64) NOT NULL REFERENCES workload_runs(id) ON DELETE CASCADE,
+          row_index INT NOT NULL,
+          timestamp BIGINT NOT NULL,
+          request_id VARCHAR(128) NOT NULL,
+          object_id VARCHAR(128) NOT NULL,
+          operation VARCHAR(32) NOT NULL DEFAULT 'GET',
+          response_size INT NOT NULL DEFAULT 0,
+          backend_latency INT NOT NULL DEFAULT 0,
+          regeneration_cost INT NOT NULL DEFAULT 0,
+          status_code INT NOT NULL DEFAULT 200,
+          ttl INT,
+          content_type VARCHAR(64),
+          priority INT,
+          region VARCHAR(64),
+          is_valid BOOLEAN NOT NULL DEFAULT TRUE,
+          validation_error TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_workload_requests_wid ON workload_requests(workload_id, row_index);
+        CREATE INDEX IF NOT EXISTS idx_workload_requests_time ON workload_requests(workload_id, timestamp);
+      `);
+
       console.log('[Migrations] All PostgreSQL tables and indexes created successfully.');
       return true;
     } catch (err: any) {

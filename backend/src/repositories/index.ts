@@ -7,3 +7,4 @@ export * from './requestLogRepository';
 export * from './decisionRepository';
 export * from './eventRepository';
 export * from './settingsRepository';
+export * from './workloadRepository';
