@@ -61,9 +61,11 @@ class DatabaseService {
         if (dbUrl) {
             try {
                 const isSsl = dbUrl.includes('supabase') ||
+                    dbUrl.includes('pooler.supabase.com') ||
                     dbUrl.includes('sslmode=require') ||
                     dbUrl.includes('render.com') ||
-                    dbUrl.includes('aws');
+                    dbUrl.includes('aws') ||
+                    (!dbUrl.includes('localhost') && !dbUrl.includes('127.0.0.1'));
                 this.pgPool = new pg_1.Pool({
                     connectionString: dbUrl,
                     connectionTimeoutMillis: 5000,
@@ -345,7 +347,7 @@ class DatabaseService {
                 return { status: 'CONNECTED', latencyMs: latency, message: 'PostgreSQL connection pool healthy (Supabase compatible)' };
             }
             catch (err) {
-                return { status: 'DEGRADED', latencyMs: Date.now() - start, message: `PostgreSQL connection issue: ${err.message}` };
+                return { status: 'OFFLINE', latencyMs: Date.now() - start, message: `PostgreSQL connection failed: ${err.message}` };
             }
         }
         return {

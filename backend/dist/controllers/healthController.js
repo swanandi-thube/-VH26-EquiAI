@@ -24,7 +24,7 @@ class HealthController {
         const apiLatency = Date.now() - apiStartTime;
         // Determine component statuses
         const redisStatus = redisHealth.status === 'CONNECTED' ? 'CONNECTED' : (redisHealth.status === 'DEGRADED' ? 'DEGRADED' : 'OFFLINE');
-        const postgresStatus = dbHealth.status === 'CONNECTED' ? 'CONNECTED' : (dbHealth.status === 'DEGRADED' ? 'DEGRADED' : 'OFFLINE');
+        const postgresStatus = dbHealth.status === 'CONNECTED' ? 'CONNECTED' : 'OFFLINE';
         const apiStatus = 'CONNECTED';
         const decisionStatus = 'CONNECTED';
         const telemetryStatus = 'CONNECTED';
@@ -34,7 +34,7 @@ class HealthController {
         if (postgresStatus === 'OFFLINE' || redisStatus === 'OFFLINE') {
             overall = (postgresStatus === 'CONNECTED' || redisStatus === 'CONNECTED') ? 'DEGRADED' : 'OFFLINE';
         }
-        else if (postgresStatus === 'DEGRADED' || redisStatus === 'DEGRADED') {
+        else if (redisStatus === 'DEGRADED') {
             overall = 'DEGRADED';
         }
         const report = {

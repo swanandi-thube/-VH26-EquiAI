@@ -27,9 +27,11 @@ export class DatabaseClient {
     if (config.databaseUrl) {
       try {
         const isSsl = config.databaseUrl.includes('supabase') ||
+                      config.databaseUrl.includes('pooler.supabase.com') ||
                       config.databaseUrl.includes('sslmode=require') ||
                       config.databaseUrl.includes('render.com') ||
-                      config.databaseUrl.includes('aws');
+                      config.databaseUrl.includes('aws') ||
+                      (!config.databaseUrl.includes('localhost') && !config.databaseUrl.includes('127.0.0.1'));
 
         this.pool = new Pool({
           connectionString: config.databaseUrl,
@@ -154,9 +156,9 @@ export class DatabaseClient {
     } catch (err: any) {
       this.isConnected = false;
       return {
-        status: 'DEGRADED',
+        status: 'OFFLINE',
         latencyMs: Date.now() - start,
-        message: `PostgreSQL connection probe failed: ${err.message}`,
+        message: `PostgreSQL connection failed: ${err.message}`,
       };
     }
   }

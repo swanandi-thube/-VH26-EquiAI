@@ -6,3 +6,15 @@ Thumbs.db
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Environment Variables & Secrets
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+

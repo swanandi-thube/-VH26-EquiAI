@@ -28,7 +28,7 @@ export class HealthController {
 
     // Determine component statuses
     const redisStatus: SystemHealthStatus = redisHealth.status === 'CONNECTED' ? 'CONNECTED' : (redisHealth.status === 'DEGRADED' ? 'DEGRADED' : 'OFFLINE');
-    const postgresStatus: SystemHealthStatus = dbHealth.status === 'CONNECTED' ? 'CONNECTED' : (dbHealth.status === 'DEGRADED' ? 'DEGRADED' : 'OFFLINE');
+    const postgresStatus: SystemHealthStatus = dbHealth.status === 'CONNECTED' ? 'CONNECTED' : 'OFFLINE';
     const apiStatus: SystemHealthStatus = 'CONNECTED';
     const decisionStatus: SystemHealthStatus = 'CONNECTED';
     const telemetryStatus: SystemHealthStatus = 'CONNECTED';
@@ -38,7 +38,7 @@ export class HealthController {
     let overall: SystemHealthStatus = 'CONNECTED';
     if (postgresStatus === 'OFFLINE' || redisStatus === 'OFFLINE') {
       overall = (postgresStatus === 'CONNECTED' || redisStatus === 'CONNECTED') ? 'DEGRADED' : 'OFFLINE';
-    } else if (postgresStatus === 'DEGRADED' || redisStatus === 'DEGRADED') {
+    } else if (redisStatus === 'DEGRADED') {
       overall = 'DEGRADED';
     }
 
