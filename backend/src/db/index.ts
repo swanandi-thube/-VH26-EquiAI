@@ -7,6 +7,7 @@
 import { Pool } from 'pg';
 import * as fs from 'fs';
 import * as path from 'path';
+import { config } from '../config';
 import {
   DecisionRecord,
   RequestLog,
@@ -107,13 +108,19 @@ export class DatabaseService {
   }
 
   private async initPostgres() {
-    const dbUrl = process.env.DATABASE_URL;
+    const dbUrl = config.databaseUrl;
     if (dbUrl) {
       try {
+        const isSsl = dbUrl.includes('supabase') ||
+                      dbUrl.includes('sslmode=require') ||
+                      dbUrl.includes('render.com') ||
+                      dbUrl.includes('aws');
+
         this.pgPool = new Pool({
           connectionString: dbUrl,
-          connectionTimeoutMillis: 3000,
+          connectionTimeoutMillis: 5000,
           max: 20,
+          ssl: isSsl ? { rejectUnauthorized: false } : undefined,
         });
         const client = await this.pgPool.connect();
         const res = await client.query('SELECT NOW()');
@@ -122,10 +129,11 @@ export class DatabaseService {
         console.log(`[Database] PostgreSQL connected successfully at ${res.rows[0].now}`);
         await this.runMigrations();
       } catch (err: any) {
-        console.warn(`[Database] PostgreSQL connection failed (${err.message}). Using local high-speed Relational Engine.`);
+        console.warn(`[Database] PostgreSQL connection failed (${err.message}). Operating in high-speed zero-latency Relational Engine.`);
         this.isPostgresConnected = false;
       }
     } else {
+      this.isPostgresConnected = false;
       console.log(`[Database] No DATABASE_URL provided. Operating in high-speed zero-latency Relational Engine.`);
     }
   }
@@ -414,14 +422,16 @@ export class DatabaseService {
       try {
         await this.pgPool.query('SELECT 1');
         const latency = Date.now() - start;
-        return { status: 'CONNECTED', latencyMs: latency, message: 'PostgreSQL connection pool healthy' };
+        return { status: 'CONNECTED', latencyMs: latency, message: 'PostgreSQL connection pool healthy (Supabase compatible)' };
       } catch (err: any) {
         return { status: 'DEGRADED', latencyMs: Date.now() - start, message: `PostgreSQL connection issue: ${err.message}` };
       }
     }
-    // High-speed Relational Engine
-    const latency = Date.now() - start;
-    return { status: 'CONNECTED', latencyMs: latency, message: `Relational Engine active (${this.products.size} catalog items loaded)` };
+    return {
+      status: 'OFFLINE',
+      latencyMs: 0,
+      message: 'DATABASE_URL not configured. Operating in in-memory relational store mode.',
+    };
   }
 
   private sleep(ms: number): Promise<void> {
