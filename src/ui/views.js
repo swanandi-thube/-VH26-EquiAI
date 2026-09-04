@@ -10,20 +10,92 @@ export class ViewRenderers {
     this.ui = uiController;
   }
 
-  // 1. TOP TELEMETRY RIBBON
+  // 1. TOP TELEMETRY RIBBON & OVERVIEW BANNERS
   renderTelemetryRibbon(snapshot) {
     const el = (id) => document.getElementById(id);
     if (!el('tel-hit-rate')) return;
 
     el('tel-hit-rate').textContent = `${snapshot.hitRatePercent}%`;
-    el('tel-p95').textContent = `${snapshot.p95}ms`;
-    el('tel-p99').textContent = `${snapshot.p99}ms`;
+    el('tel-p95').textContent = `${snapshot.p50LatencyMs || snapshot.p95}ms`;
+    el('tel-p99').textContent = `${snapshot.p99LatencyMs || snapshot.p99}ms`;
     el('tel-backend-load').textContent = `${snapshot.backendLoadPercent}%`;
     el('tel-db-cpu').textContent = `${snapshot.dbCpuPercent}%`;
     el('tel-cost').textContent = `$${snapshot.costPerHour}`;
     el('tel-savings').textContent = `$${snapshot.costSavingsPerHour}`;
     el('tel-memory').textContent = `${snapshot.memoryUsedMB} MB`;
     el('tel-evictions').textContent = snapshot.evictions;
+
+    // Render Traffic State Banner
+    const tfBadge = el('overview-traffic-badge');
+    const tfText = el('overview-traffic-text');
+    if (tfBadge && tfText && snapshot.trafficState) {
+      const ts = snapshot.trafficState;
+      let badgeClass = 'state-normal';
+      let icon = '🟢';
+      if (ts.state === 'TRAFFIC_SPIKE_DETECTED') {
+        badgeClass = 'state-spike';
+        icon = '🔴';
+      } else if (ts.state === 'TRAFFIC_BURST') {
+        badgeClass = 'state-burst';
+        icon = '🟠';
+      } else if (ts.state === 'TRAFFIC_INCREASING') {
+        badgeClass = 'state-increasing';
+        icon = '🟡';
+      } else if (ts.state === 'TRAFFIC_DECREASING') {
+        badgeClass = 'state-decreasing';
+        icon = '🔵';
+      }
+
+      tfBadge.className = `traffic-badge ${badgeClass}`;
+      tfBadge.textContent = `${icon} ${ts.badge || ts.state}`;
+      tfText.textContent = ts.statusText || `${snapshot.trafficRps} req/s`;
+    }
+
+    // Render Scaling Alert Banner
+    const scBadge = el('overview-scaling-badge');
+    const scReason = el('overview-scaling-reason');
+    const scRoi = el('overview-scaling-roi');
+    if (scBadge && scReason && snapshot.scalingDecision) {
+      const sc = snapshot.scalingDecision;
+      scBadge.textContent = `${sc.badge || sc.decision} (${sc.currentGB} GB ➔ ${sc.proposedGB} GB)`;
+      scReason.textContent = sc.decisionReason || 'Optimal capacity.';
+      if (scRoi) {
+        scRoi.textContent = `ROI: ${sc.netBenefitPerHour >= 0 ? '+' : ''}$${sc.netBenefitPerHour}/hr`;
+      }
+    }
+  }
+
+  // 12. USER DATA PREVIEW TABLE
+  renderUserDataPreview(items) {
+    const tbody = document.getElementById('user-data-preview-table-body');
+    const countBadge = document.getElementById('user-data-item-count');
+    if (!tbody) return;
+
+    if (!items || items.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted" style="padding: 24px;">No custom dataset uploaded yet. Ingest CSV/JSON above or click "Load Sample Dataset".</td></tr>`;
+      if (countBadge) countBadge.textContent = '0 Items';
+      return;
+    }
+
+    if (countBadge) countBadge.textContent = `${items.length} Items`;
+
+    let html = '';
+    for (const item of items) {
+      const sizeKB = Math.round(item.sizeBytes / 1024);
+      const sizeStr = sizeKB > 1024 ? `${(sizeKB / 1024).toFixed(1)} MB` : `${sizeKB} KB`;
+      html += `
+        <tr>
+          <td class="font-mono font-bold text-info">${item.id}</td>
+          <td>${item.name}</td>
+          <td><span class="badge badge-neutral">${item.category}</span></td>
+          <td class="font-mono">${sizeStr}</td>
+          <td class="font-mono">${item.baseDbLatencyMs} ms</td>
+          <td class="font-mono text-warning">${item.recomputeCostUnits}x</td>
+          <td class="font-mono">${(item.updateVolatility * 100).toFixed(0)}%</td>
+        </tr>
+      `;
+    }
+    tbody.innerHTML = html;
   }
 
   // 2. CACHE OBJECTS TABLE VIEW
