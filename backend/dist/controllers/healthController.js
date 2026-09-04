@@ -6,6 +6,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.healthController = exports.HealthController = void 0;
 const client_1 = require("../database/client");
+const migrations_1 = require("../database/migrations");
 const redis_1 = require("../cache/redis");
 const server_1 = require("../ws/server");
 class HealthController {
@@ -15,7 +16,7 @@ class HealthController {
      */
     async getHealth(req, res) {
         const apiStartTime = Date.now();
-        // 1. Query Redis and PostgreSQL health simultaneously
+        // 1. Query Redis and PostgreSQL health simultaneously (real SELECT 1 and Redis PING)
         const [redisHealth, dbHealth] = await Promise.all([
             redis_1.redisCache.checkHealth(),
             client_1.dbClient.checkHealth(),
@@ -76,6 +77,21 @@ class HealthController {
         res.status(statusCode).json({
             success: overall !== 'OFFLINE',
             data: report,
+        });
+    }
+    /**
+     * Dedicated PostgreSQL / Supabase Database Status & Table Verification
+     * GET /api/system/db
+     */
+    async getDbStatus(req, res) {
+        const health = await client_1.dbClient.checkHealth();
+        const verification = await migrations_1.MigrationRunner.verifyTables();
+        res.json({
+            success: health.status === 'CONNECTED',
+            data: {
+                health,
+                schema: verification,
+            },
         });
     }
 }

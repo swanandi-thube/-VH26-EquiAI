@@ -1143,14 +1143,39 @@ async function runTests() {
   assert(config.defaultTtlSeconds > 0, `18.3c Default TTL configured (${config.defaultTtlSeconds}s)`);
   assert(config.maxCacheCapacityBytes > 0, `18.3d Max cache capacity configured (${config.maxCacheCapacityBytes} bytes)`);
 
-  // 18.4 Database Migration Idempotency
+  // 18.4 Database Migration Idempotency & All 14 Required Tables Verification
+  const reqTables = MigrationRunner.getRequiredTables();
+  assert(reqTables.length === 14, `18.4a All 14 required tables defined in MigrationRunner (got ${reqTables.length})`);
+  const expectedTableNames = [
+    'users',
+    'cache_objects',
+    'cache_accesses',
+    'cache_decisions',
+    'request_logs',
+    'system_events',
+    'workload_runs',
+    'workload_requests',
+    'benchmark_runs',
+    'benchmark_results',
+    'scenario_runs',
+    'cost_records',
+    'system_settings',
+    'object_observations',
+  ];
+  const all14Present = expectedTableNames.every((t) => reqTables.includes(t));
+  assert(all14Present === true, '18.4b Every required table name verified in schema definition list');
+
   let migrationRanSafely = true;
   try {
     await MigrationRunner.runMigrations();
   } catch (err) {
     migrationRanSafely = false;
   }
-  assert(migrationRanSafely === true, '18.4 Database migrations run idempotently without error');
+  assert(migrationRanSafely === true, '18.4c Database migrations run idempotently without error');
+
+  const verificationRes = await MigrationRunner.verifyTables();
+  assert(verificationRes.expectedCount === 14, '18.4d Table verification reports 14 expected tables');
+  assert(typeof verificationRes.verified === 'boolean', '18.4e Table verification status boolean returned');
 
   // 18.5 In-Memory Fallback Reliability Across Repositories
   const testSettingObj = await settingsRepository.getSettings();

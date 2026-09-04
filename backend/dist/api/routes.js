@@ -21,6 +21,7 @@ exports.apiRouter = (0, express_1.Router)();
 // --- Health Verification ---
 exports.apiRouter.get('/health', (req, res) => controllers_1.healthController.getHealth(req, res));
 exports.apiRouter.get('/system/health', (req, res) => controllers_1.healthController.getHealth(req, res));
+exports.apiRouter.get('/system/db', (req, res) => controllers_1.healthController.getDbStatus(req, res));
 // --- Dashboard & Telemetry ---
 exports.apiRouter.get('/dashboard/metrics', (req, res) => {
     const snapshot = telemetry_1.telemetry.getSnapshot();

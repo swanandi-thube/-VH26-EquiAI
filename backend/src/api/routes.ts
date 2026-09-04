@@ -30,6 +30,7 @@ export const apiRouter = Router();
 // --- Health Verification ---
 apiRouter.get('/health', (req: Request, res: Response) => healthController.getHealth(req, res));
 apiRouter.get('/system/health', (req: Request, res: Response) => healthController.getHealth(req, res));
+apiRouter.get('/system/db', (req: Request, res: Response) => healthController.getDbStatus(req, res));
 
 // --- Dashboard & Telemetry ---
 apiRouter.get('/dashboard/metrics', (req: Request, res: Response) => {

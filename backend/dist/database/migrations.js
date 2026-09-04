@@ -1,21 +1,54 @@
 "use strict";
 /**
- * PostgreSQL Database Migrations & Initial Seed Runner
- * Creates minimum required tables for Phase 1 and seeds default settings and objects.
+ * PostgreSQL Database Migrations & Table Verification Runner
+ * Creates all 14 required tables, indexes, and foreign keys for ADAPTIVECACHE (Supabase & local PG compatible).
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.MigrationRunner = void 0;
+exports.MigrationRunner = exports.REQUIRED_TABLES = void 0;
 const client_1 = require("./client");
+exports.REQUIRED_TABLES = [
+    'users',
+    'cache_objects',
+    'cache_accesses',
+    'cache_decisions',
+    'request_logs',
+    'system_events',
+    'workload_runs',
+    'workload_requests',
+    'benchmark_runs',
+    'benchmark_results',
+    'scenario_runs',
+    'cost_records',
+    'system_settings',
+    'object_observations',
+];
 class MigrationRunner {
+    static getRequiredTables() {
+        return exports.REQUIRED_TABLES;
+    }
     static async runMigrations() {
         const health = await client_1.dbClient.checkHealth();
-        if (health.status === 'OFFLINE') {
-            console.log('[Migrations] Skipping PostgreSQL migrations (No active DATABASE_URL).');
+        if (health.status !== 'CONNECTED') {
+            console.log('[Migrations] Skipping PostgreSQL migrations (No active database connection).');
             return false;
         }
         try {
-            console.log('[Migrations] Executing PostgreSQL schema migrations...');
-            // 1. system_settings table
+            console.log('[Migrations] Executing PostgreSQL schema migrations for all 14 tables...');
+            // 1. users table
+            await client_1.dbClient.query(`
+        CREATE TABLE IF NOT EXISTS users (
+          id VARCHAR(64) PRIMARY KEY,
+          username VARCHAR(128) UNIQUE NOT NULL,
+          email VARCHAR(255) UNIQUE NOT NULL,
+          tier VARCHAR(32) NOT NULL DEFAULT 'FREE',
+          region VARCHAR(64) DEFAULT 'us-east-1',
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+        CREATE INDEX IF NOT EXISTS idx_users_tier ON users(tier);
+      `);
+            // 2. system_settings table
             await client_1.dbClient.query(`
         CREATE TABLE IF NOT EXISTS system_settings (
           id VARCHAR(32) PRIMARY KEY DEFAULT 'default',
@@ -32,7 +65,7 @@ class MigrationRunner {
           updated_at TIMESTAMPTZ DEFAULT NOW()
         );
       `);
-            // 2. cache_objects table (Generic entity store)
+            // 3. cache_objects table
             await client_1.dbClient.query(`
         CREATE TABLE IF NOT EXISTS cache_objects (
           object_id VARCHAR(128) PRIMARY KEY,
@@ -47,8 +80,9 @@ class MigrationRunner {
           updated_at TIMESTAMPTZ DEFAULT NOW()
         );
         CREATE INDEX IF NOT EXISTS idx_cache_objects_key ON cache_objects(key);
+        CREATE INDEX IF NOT EXISTS idx_cache_objects_cat ON cache_objects(category);
       `);
-            // 3. cache_accesses table
+            // 4. cache_accesses table (FK -> cache_objects)
             await client_1.dbClient.query(`
         CREATE TABLE IF NOT EXISTS cache_accesses (
           id BIGSERIAL PRIMARY KEY,
@@ -59,7 +93,7 @@ class MigrationRunner {
         );
         CREATE INDEX IF NOT EXISTS idx_cache_accesses_obj_time ON cache_accesses(object_id, accessed_at DESC);
       `);
-            // 4. request_logs table
+            // 5. request_logs table
             await client_1.dbClient.query(`
         CREATE TABLE IF NOT EXISTS request_logs (
           request_id VARCHAR(64) PRIMARY KEY,
@@ -78,8 +112,9 @@ class MigrationRunner {
           strategy_used VARCHAR(32) DEFAULT 'ADAPTIVE'
         );
         CREATE INDEX IF NOT EXISTS idx_request_logs_time ON request_logs(timestamp DESC);
+        CREATE INDEX IF NOT EXISTS idx_request_logs_obj_time ON request_logs(object_id, timestamp DESC);
       `);
-            // 5. cache_decisions table
+            // 6. cache_decisions table
             await client_1.dbClient.query(`
         CREATE TABLE IF NOT EXISTS cache_decisions (
           id VARCHAR(64) PRIMARY KEY,
@@ -94,9 +129,10 @@ class MigrationRunner {
           reason TEXT NOT NULL,
           timestamp BIGINT NOT NULL
         );
+        CREATE INDEX IF NOT EXISTS idx_cache_decisions_obj_time ON cache_decisions(object_id, timestamp DESC);
         CREATE INDEX IF NOT EXISTS idx_cache_decisions_time ON cache_decisions(timestamp DESC);
       `);
-            // 6. system_events table
+            // 7. system_events table
             await client_1.dbClient.query(`
         CREATE TABLE IF NOT EXISTS system_events (
           id VARCHAR(64) PRIMARY KEY,
@@ -108,8 +144,9 @@ class MigrationRunner {
           metadata JSONB
         );
         CREATE INDEX IF NOT EXISTS idx_system_events_time ON system_events(timestamp DESC);
+        CREATE INDEX IF NOT EXISTS idx_system_events_type ON system_events(event_type, timestamp DESC);
       `);
-            // 7. workload_runs table (Historical custom uploaded workloads & synthetic runs)
+            // 8. workload_runs table
             await client_1.dbClient.query(`
         CREATE TABLE IF NOT EXISTS workload_runs (
           id VARCHAR(64) PRIMARY KEY,
@@ -129,7 +166,7 @@ class MigrationRunner {
         );
         CREATE INDEX IF NOT EXISTS idx_workload_runs_time ON workload_runs(uploaded_at DESC);
       `);
-            // 8. workload_requests table (Individual request rows inside custom workloads)
+            // 9. workload_requests table (FK -> workload_runs)
             await client_1.dbClient.query(`
         CREATE TABLE IF NOT EXISTS workload_requests (
           id BIGSERIAL PRIMARY KEY,
@@ -153,7 +190,7 @@ class MigrationRunner {
         CREATE INDEX IF NOT EXISTS idx_workload_requests_wid ON workload_requests(workload_id, row_index);
         CREATE INDEX IF NOT EXISTS idx_workload_requests_time ON workload_requests(workload_id, timestamp);
       `);
-            // 9. object_observations table (Phase 5 Time-Series Append-Only Store)
+            // 10. object_observations table
             await client_1.dbClient.query(`
         CREATE TABLE IF NOT EXISTS object_observations (
           id BIGSERIAL PRIMARY KEY,
@@ -169,7 +206,7 @@ class MigrationRunner {
         );
         CREATE INDEX IF NOT EXISTS idx_object_observations_obj_time ON object_observations(object_id, timestamp DESC);
       `);
-            // 10. benchmark_runs and benchmark_results tables (Phase 8 Multi-Strategy Benchmark)
+            // 11. benchmark_runs table
             await client_1.dbClient.query(`
         CREATE TABLE IF NOT EXISTS benchmark_runs (
           id VARCHAR(64) PRIMARY KEY,
@@ -186,12 +223,142 @@ class MigrationRunner {
         );
         CREATE INDEX IF NOT EXISTS idx_benchmark_runs_time ON benchmark_runs(started_at DESC);
       `);
-            console.log('[Migrations] All PostgreSQL tables and indexes created successfully.');
+            // 12. benchmark_results table (FK -> benchmark_runs)
+            await client_1.dbClient.query(`
+        CREATE TABLE IF NOT EXISTS benchmark_results (
+          id VARCHAR(64) PRIMARY KEY,
+          benchmark_run_id VARCHAR(64) NOT NULL REFERENCES benchmark_runs(id) ON DELETE CASCADE,
+          strategy VARCHAR(32) NOT NULL,
+          total_requests INT NOT NULL DEFAULT 0,
+          cache_hits INT NOT NULL DEFAULT 0,
+          cache_misses INT NOT NULL DEFAULT 0,
+          hit_rate NUMERIC(6,4) NOT NULL DEFAULT 0,
+          miss_rate NUMERIC(6,4) NOT NULL DEFAULT 0,
+          avg_latency_ms NUMERIC(10,2) NOT NULL DEFAULT 0,
+          p95_latency_ms NUMERIC(10,2) NOT NULL DEFAULT 0,
+          p99_latency_ms NUMERIC(10,2) NOT NULL DEFAULT 0,
+          backend_requests INT NOT NULL DEFAULT 0,
+          evictions INT NOT NULL DEFAULT 0,
+          memory_used_bytes BIGINT NOT NULL DEFAULT 0,
+          total_cost_usd NUMERIC(12,6) NOT NULL DEFAULT 0,
+          metrics JSONB DEFAULT '{}'::jsonb,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_benchmark_results_run ON benchmark_results(benchmark_run_id);
+        CREATE INDEX IF NOT EXISTS idx_benchmark_results_strat ON benchmark_results(benchmark_run_id, strategy);
+      `);
+            // 13. scenario_runs table
+            await client_1.dbClient.query(`
+        CREATE TABLE IF NOT EXISTS scenario_runs (
+          id VARCHAR(64) PRIMARY KEY,
+          scenario_name VARCHAR(255) NOT NULL,
+          config JSONB NOT NULL DEFAULT '{}'::jsonb,
+          current_metrics JSONB NOT NULL DEFAULT '{}'::jsonb,
+          projected_metrics JSONB NOT NULL DEFAULT '{}'::jsonb,
+          net_savings_usd NUMERIC(12,4) DEFAULT 0,
+          status VARCHAR(32) NOT NULL DEFAULT 'COMPLETED',
+          applied_at BIGINT,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_scenario_runs_time ON scenario_runs(created_at DESC);
+      `);
+            // 14. cost_records table
+            await client_1.dbClient.query(`
+        CREATE TABLE IF NOT EXISTS cost_records (
+          id VARCHAR(64) PRIMARY KEY,
+          timestamp BIGINT NOT NULL,
+          adaptive_cost_usd NUMERIC(14,6) NOT NULL DEFAULT 0,
+          baseline_cost_usd NUMERIC(14,6) NOT NULL DEFAULT 0,
+          net_savings_usd NUMERIC(14,6) NOT NULL DEFAULT 0,
+          roi_percent NUMERIC(8,2) NOT NULL DEFAULT 0,
+          backend_offload_percent NUMERIC(6,2) NOT NULL DEFAULT 0,
+          breakdown JSONB NOT NULL DEFAULT '{}'::jsonb,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_cost_records_time ON cost_records(timestamp DESC);
+      `);
+            console.log('[Migrations] All 14 PostgreSQL tables, indexes, and foreign keys created successfully.');
             return true;
         }
         catch (err) {
             console.error('[Migrations] Migration failed:', err.message);
             return false;
+        }
+    }
+    /**
+     * Verifies the existence of all 14 required tables, foreign keys, and indexes in PostgreSQL.
+     */
+    static async verifyTables() {
+        const tablesMap = {};
+        exports.REQUIRED_TABLES.forEach((t) => (tablesMap[t] = false));
+        const health = await client_1.dbClient.checkHealth();
+        if (health.status !== 'CONNECTED') {
+            return {
+                verified: false,
+                tableCount: 0,
+                expectedCount: exports.REQUIRED_TABLES.length,
+                tables: tablesMap,
+                missingTables: [...exports.REQUIRED_TABLES],
+                foreignKeys: [],
+                indexes: [],
+            };
+        }
+        try {
+            // 1. Check existing tables in public schema
+            const res = await client_1.dbClient.query(`
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND table_type = 'BASE TABLE';
+      `);
+            const foundTables = new Set(res.rows.map((r) => r.table_name.toLowerCase()));
+            exports.REQUIRED_TABLES.forEach((t) => {
+                tablesMap[t] = foundTables.has(t.toLowerCase());
+            });
+            const missing = exports.REQUIRED_TABLES.filter((t) => !tablesMap[t]);
+            // 2. Inspect foreign keys
+            const fkRes = await client_1.dbClient.query(`
+        SELECT tc.table_name, tc.constraint_name
+        FROM information_schema.table_constraints tc
+        WHERE tc.constraint_type = 'FOREIGN KEY'
+          AND tc.table_schema = 'public';
+      `);
+            const foreignKeys = fkRes.rows.map((r) => ({
+                table: r.table_name,
+                constraint: r.constraint_name,
+            }));
+            // 3. Inspect indexes
+            const idxRes = await client_1.dbClient.query(`
+        SELECT tablename, indexname
+        FROM pg_indexes
+        WHERE schemaname = 'public';
+      `);
+            const indexes = idxRes.rows.map((r) => ({
+                table: r.tablename,
+                index: r.indexname,
+            }));
+            const verified = missing.length === 0;
+            return {
+                verified,
+                tableCount: exports.REQUIRED_TABLES.length - missing.length,
+                expectedCount: exports.REQUIRED_TABLES.length,
+                tables: tablesMap,
+                missingTables: missing,
+                foreignKeys,
+                indexes,
+            };
+        }
+        catch (err) {
+            console.error('[Migrations] Table verification failed:', err.message);
+            return {
+                verified: false,
+                tableCount: 0,
+                expectedCount: exports.REQUIRED_TABLES.length,
+                tables: tablesMap,
+                missingTables: [...exports.REQUIRED_TABLES],
+                foreignKeys: [],
+                indexes: [],
+            };
         }
     }
 }

@@ -5,6 +5,7 @@
 
 import { Request, Response } from 'express';
 import { dbClient } from '../database/client';
+import { MigrationRunner } from '../database/migrations';
 import { redisCache } from '../cache/redis';
 import { wsService } from '../ws/server';
 import { SystemHealthReport, SystemHealthStatus } from '../types';
@@ -17,7 +18,7 @@ export class HealthController {
   public async getHealth(req: Request, res: Response): Promise<void> {
     const apiStartTime = Date.now();
 
-    // 1. Query Redis and PostgreSQL health simultaneously
+    // 1. Query Redis and PostgreSQL health simultaneously (real SELECT 1 and Redis PING)
     const [redisHealth, dbHealth] = await Promise.all([
       redisCache.checkHealth(),
       dbClient.checkHealth(),
@@ -85,6 +86,24 @@ export class HealthController {
       data: report,
     });
   }
+
+  /**
+   * Dedicated PostgreSQL / Supabase Database Status & Table Verification
+   * GET /api/system/db
+   */
+  public async getDbStatus(req: Request, res: Response): Promise<void> {
+    const health = await dbClient.checkHealth();
+    const verification = await MigrationRunner.verifyTables();
+
+    res.json({
+      success: health.status === 'CONNECTED',
+      data: {
+        health,
+        schema: verification,
+      },
+    });
+  }
 }
 
 export const healthController = new HealthController();
+
