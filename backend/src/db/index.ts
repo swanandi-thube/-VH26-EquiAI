@@ -9,6 +9,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { config } from '../config';
 import { COMMODITY_CATALOG } from '../database/commodityCatalog';
+import { MigrationRunner } from '../database/migrations';
 import {
   DecisionRecord,
   RequestLog,
@@ -142,48 +143,9 @@ export class DatabaseService {
   }
 
   private async runMigrations() {
-    if (!this.pgPool || !this.isPostgresConnected) return;
+    if (!this.isPostgresConnected) return;
     try {
-      await this.pgPool.query(`
-        CREATE TABLE IF NOT EXISTS products (
-          id VARCHAR(64) PRIMARY KEY,
-          name VARCHAR(255) NOT NULL,
-          category VARCHAR(100) NOT NULL,
-          price NUMERIC(10,2) NOT NULL,
-          sku VARCHAR(64) UNIQUE NOT NULL,
-          description TEXT,
-          specs JSONB,
-          inventory_count INT,
-          size_bytes INT,
-          base_retrieval_cost_ms INT,
-          compute_complexity INT,
-          updated_at BIGINT
-        );
-        CREATE TABLE IF NOT EXISTS request_logs (
-          id VARCHAR(64) PRIMARY KEY,
-          timestamp BIGINT NOT NULL,
-          object_id VARCHAR(64) NOT NULL,
-          operation VARCHAR(16) NOT NULL,
-          response_size_bytes INT,
-          cache_hit BOOLEAN,
-          backend_latency_ms INT,
-          total_latency_ms INT,
-          status_code INT
-        );
-        CREATE TABLE IF NOT EXISTS cache_decisions (
-          id VARCHAR(64) PRIMARY KEY,
-          object_id VARCHAR(64) NOT NULL,
-          decision_type VARCHAR(32) NOT NULL,
-          adaptive_score NUMERIC(5,4),
-          reason TEXT,
-          timestamp BIGINT,
-          previous_ttl INT,
-          new_ttl INT,
-          predicted_demand NUMERIC(5,4),
-          confidence NUMERIC(5,4)
-        );
-      `);
-      console.log('[Database] PostgreSQL migrations applied.');
+      await MigrationRunner.runMigrations();
     } catch (err: any) {
       console.error('[Database] Migration error:', err.message);
     }

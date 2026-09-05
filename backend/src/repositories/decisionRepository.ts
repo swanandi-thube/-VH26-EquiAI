@@ -68,7 +68,9 @@ export class DecisionRepository {
           objectId: row.object_id,
           decisionType: row.decision_type,
           adaptiveScore: parseFloat(row.adaptive_score),
-          factors: typeof row.factors === 'string' ? JSON.parse(row.factors) : row.factors,
+          factors: row.factors
+            ? (typeof row.factors === 'string' ? JSON.parse(row.factors) : row.factors)
+            : { frequency: 0, recency: 0, trend: 0, retrievalCost: 0, backendPressure: 0, memoryCost: 0, predictedDemand: 0, confidence: 0, finalScore: 0 },
           previousTtl: parseInt(row.previous_ttl, 10),
           newTtl: parseInt(row.new_ttl, 10),
           predictedDemand: parseFloat(row.predicted_demand),
@@ -104,7 +106,9 @@ export class DecisionRepository {
             objectId: row.object_id,
             decisionType: row.decision_type,
             adaptiveScore: parseFloat(row.adaptive_score),
-            factors: typeof row.factors === 'string' ? JSON.parse(row.factors) : row.factors,
+            factors: row.factors
+              ? (typeof row.factors === 'string' ? JSON.parse(row.factors) : row.factors)
+              : { frequency: 0, recency: 0, trend: 0, retrievalCost: 0, backendPressure: 0, memoryCost: 0, predictedDemand: 0, confidence: 0, finalScore: 0 },
             previousTtl: parseInt(row.previous_ttl, 10),
             newTtl: parseInt(row.new_ttl, 10),
             predictedDemand: parseFloat(row.predicted_demand),

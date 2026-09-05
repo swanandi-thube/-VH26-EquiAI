@@ -8,6 +8,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.MigrationRunner = exports.REQUIRED_TABLES = void 0;
 const client_1 = require("./client");
 const commodityCatalog_1 = require("./commodityCatalog");
+const config_1 = require("../config");
 exports.REQUIRED_TABLES = [
     'users',
     'cache_objects',
@@ -29,8 +30,24 @@ class MigrationRunner {
         return exports.REQUIRED_TABLES;
     }
     static async runMigrations() {
-        const health = await client_1.dbClient.checkHealth();
-        if (health.status !== 'CONNECTED') {
+        if (!config_1.config.databaseUrl) {
+            console.log('[Migrations] Skipping PostgreSQL migrations (No DATABASE_URL configured).');
+            return false;
+        }
+        // Attempt to connect to PostgreSQL with up to 5 retries on startup
+        let connected = false;
+        for (let attempt = 1; attempt <= 5; attempt++) {
+            const health = await client_1.dbClient.checkHealth();
+            if (health.status === 'CONNECTED') {
+                connected = true;
+                break;
+            }
+            if (attempt < 5) {
+                console.log(`[Migrations] Waiting for PostgreSQL connection (attempt ${attempt}/5)...`);
+                await new Promise((resolve) => setTimeout(resolve, 800));
+            }
+        }
+        if (!connected) {
             console.log('[Migrations] Skipping PostgreSQL migrations (No active database connection).');
             return false;
         }
@@ -49,6 +66,10 @@ class MigrationRunner {
         );
         CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
         CREATE INDEX IF NOT EXISTS idx_users_tier ON users(tier);
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS tier VARCHAR(32) DEFAULT 'FREE';
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS region VARCHAR(64) DEFAULT 'us-east-1';
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
       `);
             // 2. system_settings table
             await client_1.dbClient.query(`
@@ -62,10 +83,21 @@ class MigrationRunner {
           rate_limit_rps INT NOT NULL DEFAULT 250,
           circuit_breaker_failure_threshold NUMERIC(3,2) NOT NULL DEFAULT 0.50,
           circuit_breaker_recovery_time_ms INT NOT NULL DEFAULT 5000,
-          weights JSONB NOT NULL,
-          cost_assumptions JSONB NOT NULL,
+          weights JSONB NOT NULL DEFAULT '{}'::jsonb,
+          cost_assumptions JSONB NOT NULL DEFAULT '{}'::jsonb,
           updated_at TIMESTAMPTZ DEFAULT NOW()
         );
+        ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS cache_capacity_bytes BIGINT DEFAULT 67108864;
+        ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS default_ttl_seconds INT DEFAULT 300;
+        ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS min_ttl_seconds INT DEFAULT 30;
+        ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS max_ttl_seconds INT DEFAULT 3600;
+        ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS prediction_window_seconds INT DEFAULT 60;
+        ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS rate_limit_rps INT DEFAULT 250;
+        ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS circuit_breaker_failure_threshold NUMERIC(3,2) DEFAULT 0.50;
+        ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS circuit_breaker_recovery_time_ms INT DEFAULT 5000;
+        ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS weights JSONB DEFAULT '{}'::jsonb;
+        ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS cost_assumptions JSONB DEFAULT '{}'::jsonb;
+        ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
       `);
             // 3. cache_objects table
             await client_1.dbClient.query(`
@@ -74,15 +106,24 @@ class MigrationRunner {
           key VARCHAR(255) NOT NULL,
           name VARCHAR(255) NOT NULL,
           category VARCHAR(100) DEFAULT 'General',
-          payload JSONB NOT NULL,
-          size_bytes INT NOT NULL,
-          base_retrieval_cost_ms INT NOT NULL,
+          payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+          size_bytes INT NOT NULL DEFAULT 0,
+          base_retrieval_cost_ms INT NOT NULL DEFAULT 0,
           compute_complexity INT DEFAULT 1,
           created_at TIMESTAMPTZ DEFAULT NOW(),
           updated_at TIMESTAMPTZ DEFAULT NOW()
         );
         CREATE INDEX IF NOT EXISTS idx_cache_objects_key ON cache_objects(key);
         CREATE INDEX IF NOT EXISTS idx_cache_objects_cat ON cache_objects(category);
+        ALTER TABLE cache_objects ADD COLUMN IF NOT EXISTS key VARCHAR(255);
+        ALTER TABLE cache_objects ADD COLUMN IF NOT EXISTS name VARCHAR(255);
+        ALTER TABLE cache_objects ADD COLUMN IF NOT EXISTS category VARCHAR(100) DEFAULT 'General';
+        ALTER TABLE cache_objects ADD COLUMN IF NOT EXISTS payload JSONB DEFAULT '{}'::jsonb;
+        ALTER TABLE cache_objects ADD COLUMN IF NOT EXISTS size_bytes INT DEFAULT 0;
+        ALTER TABLE cache_objects ADD COLUMN IF NOT EXISTS base_retrieval_cost_ms INT DEFAULT 0;
+        ALTER TABLE cache_objects ADD COLUMN IF NOT EXISTS compute_complexity INT DEFAULT 1;
+        ALTER TABLE cache_objects ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+        ALTER TABLE cache_objects ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
       `);
             // 4. cache_accesses table (FK -> cache_objects)
             await client_1.dbClient.query(`
@@ -90,11 +131,15 @@ class MigrationRunner {
           id BIGSERIAL PRIMARY KEY,
           object_id VARCHAR(128) NOT NULL,
           accessed_at TIMESTAMPTZ DEFAULT NOW(),
-          latency_ms INT NOT NULL,
-          cache_hit BOOLEAN NOT NULL,
+          latency_ms INT NOT NULL DEFAULT 0,
+          cache_hit BOOLEAN NOT NULL DEFAULT FALSE,
           source VARCHAR(32) DEFAULT 'live'
         );
         CREATE INDEX IF NOT EXISTS idx_cache_accesses_obj_time ON cache_accesses(object_id, accessed_at DESC);
+        ALTER TABLE cache_accesses ADD COLUMN IF NOT EXISTS accessed_at TIMESTAMPTZ DEFAULT NOW();
+        ALTER TABLE cache_accesses ADD COLUMN IF NOT EXISTS latency_ms INT DEFAULT 0;
+        ALTER TABLE cache_accesses ADD COLUMN IF NOT EXISTS cache_hit BOOLEAN DEFAULT FALSE;
+        ALTER TABLE cache_accesses ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'live';
       `);
             // 5. request_logs table
             await client_1.dbClient.query(`
@@ -104,7 +149,7 @@ class MigrationRunner {
           object_id VARCHAR(128) NOT NULL,
           operation VARCHAR(16) NOT NULL DEFAULT 'GET',
           response_size_bytes INT NOT NULL DEFAULT 0,
-          cache_hit BOOLEAN NOT NULL,
+          cache_hit BOOLEAN NOT NULL DEFAULT FALSE,
           backend_called BOOLEAN NOT NULL DEFAULT FALSE,
           backend_latency_ms INT NOT NULL DEFAULT 0,
           cache_latency_ms INT NOT NULL DEFAULT 0,
@@ -119,30 +164,43 @@ class MigrationRunner {
         CREATE INDEX IF NOT EXISTS idx_request_logs_time ON request_logs(timestamp DESC);
         CREATE INDEX IF NOT EXISTS idx_request_logs_obj_time ON request_logs(object_id, timestamp DESC);
         CREATE INDEX IF NOT EXISTS idx_request_logs_source ON request_logs(source);
-      `);
-            // Ensure optional columns exist if migrating from earlier schema
-            await client_1.dbClient.query(`
+        ALTER TABLE request_logs ADD COLUMN IF NOT EXISTS request_id VARCHAR(64);
+        ALTER TABLE request_logs ADD COLUMN IF NOT EXISTS backend_called BOOLEAN DEFAULT FALSE;
+        ALTER TABLE request_logs ADD COLUMN IF NOT EXISTS backend_latency_ms INT DEFAULT 0;
+        ALTER TABLE request_logs ADD COLUMN IF NOT EXISTS cache_latency_ms INT DEFAULT 0;
+        ALTER TABLE request_logs ADD COLUMN IF NOT EXISTS total_latency_ms INT DEFAULT 0;
+        ALTER TABLE request_logs ADD COLUMN IF NOT EXISTS error_message TEXT;
+        ALTER TABLE request_logs ADD COLUMN IF NOT EXISTS was_coalesced BOOLEAN DEFAULT FALSE;
+        ALTER TABLE request_logs ADD COLUMN IF NOT EXISTS strategy_used VARCHAR(32) DEFAULT 'ADAPTIVE';
         ALTER TABLE request_logs ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'live';
         ALTER TABLE request_logs ADD COLUMN IF NOT EXISTS mode VARCHAR(32) DEFAULT 'live';
       `);
-            // 6. cache_decisions table
+            // 6. cache_decisions table (with factors JSONB and full schema repair)
             await client_1.dbClient.query(`
         CREATE TABLE IF NOT EXISTS cache_decisions (
           id VARCHAR(64) PRIMARY KEY,
           object_id VARCHAR(128) NOT NULL,
           decision_type VARCHAR(32) NOT NULL,
-          adaptive_score NUMERIC(5,4) NOT NULL,
-          factors JSONB NOT NULL,
-          previous_ttl INT NOT NULL,
-          new_ttl INT NOT NULL,
-          predicted_demand NUMERIC(5,4) NOT NULL,
-          confidence NUMERIC(5,4) NOT NULL,
-          reason TEXT NOT NULL,
+          adaptive_score NUMERIC(5,4) NOT NULL DEFAULT 0.0,
+          factors JSONB NOT NULL DEFAULT '{}'::jsonb,
+          previous_ttl INT NOT NULL DEFAULT 300,
+          new_ttl INT NOT NULL DEFAULT 300,
+          predicted_demand NUMERIC(5,4) NOT NULL DEFAULT 0.0,
+          confidence NUMERIC(5,4) NOT NULL DEFAULT 0.0,
+          reason TEXT NOT NULL DEFAULT '',
           timestamp BIGINT NOT NULL,
           source VARCHAR(32) DEFAULT 'live'
         );
         CREATE INDEX IF NOT EXISTS idx_cache_decisions_obj_time ON cache_decisions(object_id, timestamp DESC);
         CREATE INDEX IF NOT EXISTS idx_cache_decisions_time ON cache_decisions(timestamp DESC);
+        ALTER TABLE cache_decisions ADD COLUMN IF NOT EXISTS factors JSONB DEFAULT '{}'::jsonb;
+        ALTER TABLE cache_decisions ADD COLUMN IF NOT EXISTS adaptive_score NUMERIC(5,4) DEFAULT 0.0;
+        ALTER TABLE cache_decisions ADD COLUMN IF NOT EXISTS previous_ttl INT DEFAULT 300;
+        ALTER TABLE cache_decisions ADD COLUMN IF NOT EXISTS new_ttl INT DEFAULT 300;
+        ALTER TABLE cache_decisions ADD COLUMN IF NOT EXISTS predicted_demand NUMERIC(5,4) DEFAULT 0.0;
+        ALTER TABLE cache_decisions ADD COLUMN IF NOT EXISTS confidence NUMERIC(5,4) DEFAULT 0.0;
+        ALTER TABLE cache_decisions ADD COLUMN IF NOT EXISTS reason TEXT DEFAULT '';
+        ALTER TABLE cache_decisions ADD COLUMN IF NOT EXISTS timestamp BIGINT DEFAULT 0;
         ALTER TABLE cache_decisions ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'live';
       `);
             // 7. system_events table
@@ -154,11 +212,14 @@ class MigrationRunner {
           object_id VARCHAR(128),
           score NUMERIC(5,4),
           reason TEXT NOT NULL,
-          metadata JSONB,
+          metadata JSONB DEFAULT '{}'::jsonb,
           source VARCHAR(32) DEFAULT 'live'
         );
         CREATE INDEX IF NOT EXISTS idx_system_events_time ON system_events(timestamp DESC);
         CREATE INDEX IF NOT EXISTS idx_system_events_type ON system_events(event_type, timestamp DESC);
+        ALTER TABLE system_events ADD COLUMN IF NOT EXISTS object_id VARCHAR(128);
+        ALTER TABLE system_events ADD COLUMN IF NOT EXISTS score NUMERIC(5,4);
+        ALTER TABLE system_events ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
         ALTER TABLE system_events ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'live';
       `);
             // 8. workload_runs table
@@ -180,6 +241,17 @@ class MigrationRunner {
           uploaded_at BIGINT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_workload_runs_time ON workload_runs(uploaded_at DESC);
+        ALTER TABLE workload_runs ADD COLUMN IF NOT EXISTS file_size_bytes BIGINT DEFAULT 0;
+        ALTER TABLE workload_runs ADD COLUMN IF NOT EXISTS total_rows INT DEFAULT 0;
+        ALTER TABLE workload_runs ADD COLUMN IF NOT EXISTS valid_rows INT DEFAULT 0;
+        ALTER TABLE workload_runs ADD COLUMN IF NOT EXISTS rejected_rows INT DEFAULT 0;
+        ALTER TABLE workload_runs ADD COLUMN IF NOT EXISTS unique_objects INT DEFAULT 0;
+        ALTER TABLE workload_runs ADD COLUMN IF NOT EXISTS start_time BIGINT;
+        ALTER TABLE workload_runs ADD COLUMN IF NOT EXISTS end_time BIGINT;
+        ALTER TABLE workload_runs ADD COLUMN IF NOT EXISTS duration_seconds INT DEFAULT 0;
+        ALTER TABLE workload_runs ADD COLUMN IF NOT EXISTS status VARCHAR(32) DEFAULT 'VALIDATED';
+        ALTER TABLE workload_runs ADD COLUMN IF NOT EXISTS validation_errors JSONB DEFAULT '[]'::jsonb;
+        ALTER TABLE workload_runs ADD COLUMN IF NOT EXISTS uploaded_at BIGINT;
       `);
             // 9. workload_requests table (FK -> workload_runs)
             await client_1.dbClient.query(`
@@ -230,9 +302,6 @@ class MigrationRunner {
         );
         CREATE INDEX IF NOT EXISTS idx_object_observations_obj_time ON object_observations(object_id, timestamp DESC);
         CREATE INDEX IF NOT EXISTS idx_object_observations_src ON object_observations(source);
-      `);
-            // Upgrade existing object_observations table columns if present
-            await client_1.dbClient.query(`
         ALTER TABLE object_observations ADD COLUMN IF NOT EXISTS product_name VARCHAR(255);
         ALTER TABLE object_observations ADD COLUMN IF NOT EXISTS category VARCHAR(100);
         ALTER TABLE object_observations ADD COLUMN IF NOT EXISTS location VARCHAR(128);
@@ -241,6 +310,12 @@ class MigrationRunner {
         ALTER TABLE object_observations ADD COLUMN IF NOT EXISTS source VARCHAR(64) DEFAULT 'live';
         ALTER TABLE object_observations ADD COLUMN IF NOT EXISTS source_reference VARCHAR(128);
         ALTER TABLE object_observations ADD COLUMN IF NOT EXISTS data_status VARCHAR(32) DEFAULT 'COMMITTED';
+        ALTER TABLE object_observations ADD COLUMN IF NOT EXISTS request_count INT DEFAULT 1;
+        ALTER TABLE object_observations ADD COLUMN IF NOT EXISTS demand NUMERIC(10,2) DEFAULT 1.00;
+        ALTER TABLE object_observations ADD COLUMN IF NOT EXISTS inventory INT;
+        ALTER TABLE object_observations ADD COLUMN IF NOT EXISTS backend_latency INT DEFAULT 0;
+        ALTER TABLE object_observations ADD COLUMN IF NOT EXISTS retrieval_cost INT DEFAULT 0;
+        ALTER TABLE object_observations ADD COLUMN IF NOT EXISTS response_size INT DEFAULT 0;
         ALTER TABLE object_observations ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
       `);
             // 11. benchmark_runs table
@@ -259,6 +334,10 @@ class MigrationRunner {
           created_at TIMESTAMPTZ DEFAULT NOW()
         );
         CREATE INDEX IF NOT EXISTS idx_benchmark_runs_time ON benchmark_runs(started_at DESC);
+        ALTER TABLE benchmark_runs ADD COLUMN IF NOT EXISTS is_trace_verified_fair BOOLEAN DEFAULT TRUE;
+        ALTER TABLE benchmark_runs ADD COLUMN IF NOT EXISTS fairness_details JSONB DEFAULT '{}'::jsonb;
+        ALTER TABLE benchmark_runs ADD COLUMN IF NOT EXISTS results JSONB DEFAULT '[]'::jsonb;
+        ALTER TABLE benchmark_runs ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
       `);
             // 12. benchmark_results table (FK -> benchmark_runs)
             await client_1.dbClient.query(`
@@ -283,6 +362,8 @@ class MigrationRunner {
         );
         CREATE INDEX IF NOT EXISTS idx_benchmark_results_run ON benchmark_results(benchmark_run_id);
         CREATE INDEX IF NOT EXISTS idx_benchmark_results_strat ON benchmark_results(benchmark_run_id, strategy);
+        ALTER TABLE benchmark_results ADD COLUMN IF NOT EXISTS metrics JSONB DEFAULT '{}'::jsonb;
+        ALTER TABLE benchmark_results ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
       `);
             // 13. scenario_runs table
             await client_1.dbClient.query(`
@@ -298,6 +379,10 @@ class MigrationRunner {
           created_at TIMESTAMPTZ DEFAULT NOW()
         );
         CREATE INDEX IF NOT EXISTS idx_scenario_runs_time ON scenario_runs(created_at DESC);
+        ALTER TABLE scenario_runs ADD COLUMN IF NOT EXISTS net_savings_usd NUMERIC(12,4) DEFAULT 0;
+        ALTER TABLE scenario_runs ADD COLUMN IF NOT EXISTS status VARCHAR(32) DEFAULT 'COMPLETED';
+        ALTER TABLE scenario_runs ADD COLUMN IF NOT EXISTS applied_at BIGINT;
+        ALTER TABLE scenario_runs ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
       `);
             // 14. cost_records table
             await client_1.dbClient.query(`
@@ -313,6 +398,10 @@ class MigrationRunner {
           created_at TIMESTAMPTZ DEFAULT NOW()
         );
         CREATE INDEX IF NOT EXISTS idx_cost_records_time ON cost_records(timestamp DESC);
+        ALTER TABLE cost_records ADD COLUMN IF NOT EXISTS roi_percent NUMERIC(8,2) DEFAULT 0;
+        ALTER TABLE cost_records ADD COLUMN IF NOT EXISTS backend_offload_percent NUMERIC(6,2) DEFAULT 0;
+        ALTER TABLE cost_records ADD COLUMN IF NOT EXISTS breakdown JSONB DEFAULT '{}'::jsonb;
+        ALTER TABLE cost_records ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
       `);
             console.log('[Migrations] All 14 PostgreSQL tables, indexes, and foreign keys verified.');
             // Seed Product Catalog and Historical Baselines
