@@ -5,6 +5,13 @@
     "lib": [
       "ES2022"
     ],
+    "types": [
+      "node"
+    ],
+    "typeRoots": [
+      "./node_modules/@types",
+      "../node_modules/@types"
+    ],
     "outDir": "./dist",
     "rootDir": "./src",
     "strict": true,

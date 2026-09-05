@@ -1,4 +1,5 @@
 "use strict";
+/// <reference types="node" />
 /**
  * ADAPTIVECACHE Backend Server Entry Point
  * Express API + WebSocket Stream + Prometheus Metrics + Database Migrations

@@ -1,3 +1,4 @@
+/// <reference types="node" />
 /**
  * Domain Types and Interfaces for ADAPTIVECACHE Platform
  */
