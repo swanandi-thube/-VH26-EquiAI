@@ -25,12 +25,16 @@ exports.apiRouter.get('/system/db', (req, res) => controllers_1.healthController
 // --- Realistic Products Catalog ---
 exports.apiRouter.get('/products', (req, res) => controllers_1.cacheController.getProducts(req, res));
 exports.apiRouter.get('/products/:objectId', (req, res) => controllers_1.cacheController.getProductById(req, res));
-// --- Cache Objects, Operational Request Flow & Invalidation ---
+// --- Cache Objects, Decisions & Specific Sub-Routes ---
 exports.apiRouter.get('/cache/objects', (req, res) => controllers_1.cacheController.getCacheObjects(req, res));
-exports.apiRouter.get('/cache/:objectId', (req, res) => controllers_1.cacheController.executeRequest(req, res));
+exports.apiRouter.get('/cache/decisions', (req, res) => controllers_1.cacheController.getDecisions(req, res));
+exports.apiRouter.get('/cache/decisions/:id/explain', (req, res) => controllers_1.cacheController.getDecisionExplanation(req, res));
+exports.apiRouter.get('/cache/events', (req, res) => controllers_1.cacheController.getEvents(req, res));
 exports.apiRouter.post('/cache/request/:id', (req, res) => controllers_1.cacheController.executeRequest(req, res));
 exports.apiRouter.post('/cache/invalidate/:objectId', (req, res) => controllers_1.cacheController.invalidateObject(req, res));
 exports.apiRouter.post('/cache/flush', (req, res) => controllers_1.cacheController.flushCache(req, res));
+// --- Parametric Cache Object Request Flow ---
+exports.apiRouter.get('/cache/:objectId', (req, res) => controllers_1.cacheController.executeRequest(req, res));
 // --- Dashboard, Metrics & Historical Data ---
 exports.apiRouter.get('/metrics', (req, res) => {
     const snapshot = telemetry_1.telemetry.getSnapshot();
@@ -58,13 +62,9 @@ exports.apiRouter.get('/telemetry', async (req, res) => {
         },
     });
 });
-// --- Decisions & Explainability ---
+// --- Decisions & Activity Aliases ---
 exports.apiRouter.get('/decisions', (req, res) => controllers_1.cacheController.getDecisions(req, res));
-exports.apiRouter.get('/cache/decisions', (req, res) => controllers_1.cacheController.getDecisions(req, res));
-exports.apiRouter.get('/cache/decisions/:id/explain', (req, res) => controllers_1.cacheController.getDecisionExplanation(req, res));
-// --- Activity Stream & Audit Events ---
 exports.apiRouter.get('/activity', (req, res) => controllers_1.cacheController.getEvents(req, res));
-exports.apiRouter.get('/cache/events', (req, res) => controllers_1.cacheController.getEvents(req, res));
 // --- Time-Series Observations & Change Detection (Phase 5) ---
 exports.apiRouter.post('/observations/record', (req, res) => controllers_1.observationController.recordObservation(req, res));
 exports.apiRouter.get('/observations', (req, res) => controllers_1.observationController.getAllObservations(req, res));

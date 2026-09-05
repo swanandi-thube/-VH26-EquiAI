@@ -36,12 +36,17 @@ apiRouter.get('/system/db', (req: Request, res: Response) => healthController.ge
 apiRouter.get('/products', (req: Request, res: Response) => cacheController.getProducts(req, res));
 apiRouter.get('/products/:objectId', (req: Request, res: Response) => cacheController.getProductById(req, res));
 
-// --- Cache Objects, Operational Request Flow & Invalidation ---
+// --- Cache Objects, Decisions & Specific Sub-Routes ---
 apiRouter.get('/cache/objects', (req: Request, res: Response) => cacheController.getCacheObjects(req, res));
-apiRouter.get('/cache/:objectId', (req: Request, res: Response) => cacheController.executeRequest(req, res));
+apiRouter.get('/cache/decisions', (req: Request, res: Response) => cacheController.getDecisions(req, res));
+apiRouter.get('/cache/decisions/:id/explain', (req: Request, res: Response) => cacheController.getDecisionExplanation(req, res));
+apiRouter.get('/cache/events', (req: Request, res: Response) => cacheController.getEvents(req, res));
 apiRouter.post('/cache/request/:id', (req: Request, res: Response) => cacheController.executeRequest(req, res));
 apiRouter.post('/cache/invalidate/:objectId', (req: Request, res: Response) => cacheController.invalidateObject(req, res));
 apiRouter.post('/cache/flush', (req: Request, res: Response) => cacheController.flushCache(req, res));
+
+// --- Parametric Cache Object Request Flow ---
+apiRouter.get('/cache/:objectId', (req: Request, res: Response) => cacheController.executeRequest(req, res));
 
 // --- Dashboard, Metrics & Historical Data ---
 apiRouter.get('/metrics', (req: Request, res: Response) => {
@@ -74,14 +79,9 @@ apiRouter.get('/telemetry', async (req: Request, res: Response) => {
   });
 });
 
-// --- Decisions & Explainability ---
+// --- Decisions & Activity Aliases ---
 apiRouter.get('/decisions', (req: Request, res: Response) => cacheController.getDecisions(req, res));
-apiRouter.get('/cache/decisions', (req: Request, res: Response) => cacheController.getDecisions(req, res));
-apiRouter.get('/cache/decisions/:id/explain', (req: Request, res: Response) => cacheController.getDecisionExplanation(req, res));
-
-// --- Activity Stream & Audit Events ---
 apiRouter.get('/activity', (req: Request, res: Response) => cacheController.getEvents(req, res));
-apiRouter.get('/cache/events', (req: Request, res: Response) => cacheController.getEvents(req, res));
 
 // --- Time-Series Observations & Change Detection (Phase 5) ---
 apiRouter.post('/observations/record', (req: Request, res: Response) => observationController.recordObservation(req, res));
