@@ -88,14 +88,23 @@ export type DemandTrendType =
 export interface ObjectObservationRecord {
   id?: string;
   objectId: string;
-  timestamp: number;
-  requestCount: number;
-  demand: number;
+  productName?: string;
+  category?: string;
+  location?: string;
   price?: number | null;
+  previousPrice?: number | null;
+  priceChangePct?: number | null;
+  timestamp: number;
+  source?: string;
+  sourceReference?: string;
+  dataStatus?: string;
+  createdAt?: number;
+  requestCount?: number;
+  demand?: number;
   inventory?: number | null;
-  backendLatencyMs: number;
-  retrievalCostMs: number;
-  responseSizeBytes: number;
+  backendLatencyMs?: number;
+  retrievalCostMs?: number;
+  responseSizeBytes?: number;
 }
 
 export interface ChangeDetectionResult {
@@ -144,7 +153,7 @@ export interface DecisionRecord {
   timestamp: number;
   createdAt?: number;
   source?: string;
-  mode?: 'live' | 'demo';
+  mode?: 'live' | 'demo' | 'historical';
 }
 
 export interface RequestLog {
@@ -163,7 +172,7 @@ export interface RequestLog {
   wasCoalesced?: boolean;
   strategyUsed?: CacheStrategy;
   source?: string;
-  mode?: 'live' | 'demo';
+  mode?: 'live' | 'demo' | 'historical';
 }
 
 export interface SystemSettings {

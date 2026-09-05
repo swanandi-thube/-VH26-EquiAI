@@ -8,6 +8,7 @@ import { Pool } from 'pg';
 import * as fs from 'fs';
 import * as path from 'path';
 import { config } from '../config';
+import { COMMODITY_CATALOG } from '../database/commodityCatalog';
 import {
   DecisionRecord,
   RequestLog,
@@ -189,66 +190,33 @@ export class DatabaseService {
   }
 
   /**
-   * Seeds realistic product catalog (500 diverse objects with varied sizes & retrieval costs)
+   * Seeds realistic commodity product catalog (32 real-world commodities like ONION_001, RICE_001, etc.)
    */
   private seedDatabase() {
-    const categories = [
-      { name: 'Computing & Servers', prefix: 'SRV', costMin: 80, costMax: 350, sizeMin: 4096, sizeMax: 65536 },
-      { name: 'AI & GPU Accelerators', prefix: 'GPU', costMin: 120, costMax: 480, sizeMin: 8192, sizeMax: 131072 },
-      { name: 'Audio & Acoustics', prefix: 'AUD', costMin: 20, costMax: 90, sizeMin: 1024, sizeMax: 8192 },
-      { name: 'Optical & Cameras', prefix: 'OPT', costMin: 40, costMax: 150, sizeMin: 2048, sizeMax: 16384 },
-      { name: 'IoT & Sensors', prefix: 'IOT', costMin: 15, costMax: 60, sizeMin: 512, sizeMax: 4096 },
-      { name: 'Networking & Mesh', prefix: 'NET', costMin: 50, costMax: 200, sizeMin: 2048, sizeMax: 12288 },
-      { name: 'Database Appliances', prefix: 'DBA', costMin: 100, costMax: 400, sizeMin: 16384, sizeMax: 98304 },
-      { name: 'Security Enclaves', prefix: 'SEC', costMin: 90, costMax: 320, sizeMin: 4096, sizeMax: 32768 },
-      { name: 'Storage Arrays', prefix: 'STR', costMin: 60, costMax: 220, sizeMin: 8192, sizeMax: 49152 },
-      { name: 'Developer Toolchains', prefix: 'DEV', costMin: 30, costMax: 110, sizeMin: 1024, sizeMax: 8192 },
-    ];
-
-    const adjectives = ['Quantum', 'Hyper', 'Nexus', 'Apex', 'Titan', 'Vortex', 'Synapse', 'Vector', 'Pulse', 'Cyber'];
-    const nouns = ['Core', 'Matrix', 'Engine', 'Node', 'Switch', 'Cluster', 'Gateway', 'Module', 'Drive', 'Bridge'];
-
-    let count = 0;
-    for (let c = 0; c < categories.length; c++) {
-      const cat = categories[c];
-      for (let i = 1; i <= 50; i++) {
-        count++;
-        const id = `Product_${count}`;
-        const adj = adjectives[(count * 3) % adjectives.length];
-        const noun = nouns[(count * 7) % nouns.length];
-        const name = `${adj} ${noun} ${cat.prefix}-${1000 + i}`;
-        
-        // Deterministic size and latency calculations
-        const sizeBytes = Math.floor(cat.sizeMin + ((count * 137) % (cat.sizeMax - cat.sizeMin)));
-        const baseCost = Math.floor(cat.costMin + ((count * 73) % (cat.costMax - cat.costMin)));
-        const price = parseFloat((49.99 + ((count * 31) % 4950)).toFixed(2));
-
-        const prod: ProductRecord = {
-          id,
-          name,
-          category: cat.name,
-          price,
-          sku: `SKU-${cat.prefix}-${1000 + i}`,
-          description: `High-reliability enterprise grade ${name} engineered for mission-critical low-latency data workloads.`,
-          specs: {
-            throughput: `${(count % 40) + 10} Gbps`,
-            mtbf: '2,500,000 hrs',
-            powerDrawWatts: (count % 250) + 45,
-            redundancy: count % 2 === 0 ? 'N+1 Active-Active' : 'Hot-Standby',
-            latencyClass: baseCost > 200 ? 'Tier-3 Deep Store' : (baseCost > 80 ? 'Tier-2 Fast Recompute' : 'Tier-1 Flash'),
-          },
-          inventoryCount: (count * 17) % 500 + 10,
-          sizeBytes,
-          baseRetrievalCostMs: baseCost,
-          computeComplexity: Math.max(1, Math.floor(baseCost / 40)),
-          updatedAt: Date.now() - (count * 100000),
-        };
-
-        this.products.set(id, prod);
-      }
+    for (let i = 0; i < COMMODITY_CATALOG.length; i++) {
+      const item = COMMODITY_CATALOG[i];
+      const prod: ProductRecord = {
+        id: item.objectId,
+        name: item.name,
+        category: item.category,
+        price: item.price,
+        sku: `SKU-${item.objectId}`,
+        description: item.description,
+        specs: {
+          ...item.specs,
+          location: item.location,
+          unit: item.unit,
+        },
+        inventoryCount: 150 + (i * 12),
+        sizeBytes: item.sizeBytes,
+        baseRetrievalCostMs: item.baseRetrievalCostMs,
+        computeComplexity: item.computeComplexity,
+        updatedAt: Date.now() - (i * 60000),
+      };
+      this.products.set(item.objectId, prod);
     }
 
-    console.log(`[Database] Relational catalog seeded with ${this.products.size} enterprise products.`);
+    console.log(`[Database] Relational catalog seeded with ${this.products.size} realistic commodity products.`);
   }
 
   /**

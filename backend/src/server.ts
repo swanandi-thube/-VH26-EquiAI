@@ -15,12 +15,35 @@ import { telemetry } from './telemetry';
 import { MigrationRunner } from './database/migrations';
 import { dbClient } from './database/client';
 
+import { healthController } from './controllers/healthController';
+
 const app = express();
 const PORT = config.port;
 
+// Support comma-separated origins, wildcard, Netlify frontend, and localhost development origins
+const getAllowedCors = (originSetting: string) => {
+  if (!originSetting || originSetting === '*') return true;
+  const origins = originSetting.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  return (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    if (!origin) return callback(null, true);
+    const reqOrigin = origin.toLowerCase();
+    const isAllowed = origins.some(allowed =>
+      allowed === '*' ||
+      reqOrigin === allowed ||
+      reqOrigin.includes(allowed.replace(/^https?:\/\//, ''))
+    );
+    callback(null, isAllowed);
+  };
+};
+
 // Enable CORS and JSON body parser
-app.use(cors({ origin: config.corsOrigin }));
+app.use(cors({ origin: getAllowedCors(config.corsOrigin), credentials: true }));
 app.use(express.json());
+
+// Production Health Endpoints
+app.get('/health', (req, res) => healthController.getHealth(req, res));
+app.get('/api/health', (req, res) => healthController.getHealth(req, res));
+app.get('/api/system/health', (req, res) => healthController.getHealth(req, res));
 
 // API Routes
 app.use('/api', apiRouter);

@@ -253,6 +253,23 @@ export const apiClient = {
     return json.data;
   },
 
+  async getProducts(limit = 100): Promise<any> {
+    const res = await fetch(`${API_BASE}/products?limit=${limit}`);
+    const json = await res.json();
+    return json.data;
+  },
+
+  async getHistory(limit = 100): Promise<any> {
+    const res = await fetch(`${API_BASE}/history?limit=${limit}`);
+    const json = await res.json();
+    return json.data;
+  },
+
+  async invalidateObject(objectId: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/cache/invalidate/${objectId}`, { method: 'POST' });
+    return await res.json();
+  },
+
   // --- Demo Mode Endpoints ---
   async startDemo(scenario: string = 'BASIC_CACHE', options?: { multiplier?: number; cacheCapacityBytes?: number; simulatedLatencyMs?: number; simulatedErrorRate?: number }): Promise<any> {
     const res = await fetch(`${API_BASE}/demo/start`, {
@@ -288,4 +305,5 @@ export const apiClient = {
     return json.data;
   },
 };
+
 

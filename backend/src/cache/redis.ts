@@ -63,6 +63,10 @@ export class RedisCacheService {
           lazyConnect: true,
           tls: isTls ? { rejectUnauthorized: false } : undefined,
           retryStrategy: (times) => {
+            if (times > 5) {
+              console.warn('[Redis] Max reconnection attempts reached. Continuing with high-speed integrated engine.');
+              return null;
+            }
             const delay = Math.min(times * 200, 3000);
             console.log(`[Redis] Reconnection attempt #${times} in ${delay}ms...`);
             return delay;

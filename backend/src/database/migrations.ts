@@ -1,9 +1,11 @@
 /**
  * PostgreSQL Database Migrations & Table Verification Runner
- * Creates all 14 required tables, indexes, and foreign keys for ADAPTIVECACHE (Supabase & local PG compatible).
+ * Creates all 14 required tables, indexes, and foreign keys for ADAPTIVECACHE (Supabase & local PG compatible),
+ * and seeds realistic commodity products and deterministic historical baseline data.
  */
 
 import { dbClient } from './client';
+import { COMMODITY_CATALOG } from './commodityCatalog';
 
 export interface TableVerificationResult {
   verified: boolean;
@@ -102,10 +104,11 @@ export class MigrationRunner {
       await dbClient.query(`
         CREATE TABLE IF NOT EXISTS cache_accesses (
           id BIGSERIAL PRIMARY KEY,
-          object_id VARCHAR(128) NOT NULL REFERENCES cache_objects(object_id) ON DELETE CASCADE,
+          object_id VARCHAR(128) NOT NULL,
           accessed_at TIMESTAMPTZ DEFAULT NOW(),
           latency_ms INT NOT NULL,
-          cache_hit BOOLEAN NOT NULL
+          cache_hit BOOLEAN NOT NULL,
+          source VARCHAR(32) DEFAULT 'live'
         );
         CREATE INDEX IF NOT EXISTS idx_cache_accesses_obj_time ON cache_accesses(object_id, accessed_at DESC);
       `);
@@ -126,10 +129,19 @@ export class MigrationRunner {
           status_code INT NOT NULL DEFAULT 200,
           error_message TEXT,
           was_coalesced BOOLEAN DEFAULT FALSE,
-          strategy_used VARCHAR(32) DEFAULT 'ADAPTIVE'
+          strategy_used VARCHAR(32) DEFAULT 'ADAPTIVE',
+          source VARCHAR(32) DEFAULT 'live',
+          mode VARCHAR(32) DEFAULT 'live'
         );
         CREATE INDEX IF NOT EXISTS idx_request_logs_time ON request_logs(timestamp DESC);
         CREATE INDEX IF NOT EXISTS idx_request_logs_obj_time ON request_logs(object_id, timestamp DESC);
+        CREATE INDEX IF NOT EXISTS idx_request_logs_source ON request_logs(source);
+      `);
+
+      // Ensure optional columns exist if migrating from earlier schema
+      await dbClient.query(`
+        ALTER TABLE request_logs ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'live';
+        ALTER TABLE request_logs ADD COLUMN IF NOT EXISTS mode VARCHAR(32) DEFAULT 'live';
       `);
 
       // 6. cache_decisions table
@@ -145,10 +157,12 @@ export class MigrationRunner {
           predicted_demand NUMERIC(5,4) NOT NULL,
           confidence NUMERIC(5,4) NOT NULL,
           reason TEXT NOT NULL,
-          timestamp BIGINT NOT NULL
+          timestamp BIGINT NOT NULL,
+          source VARCHAR(32) DEFAULT 'live'
         );
         CREATE INDEX IF NOT EXISTS idx_cache_decisions_obj_time ON cache_decisions(object_id, timestamp DESC);
         CREATE INDEX IF NOT EXISTS idx_cache_decisions_time ON cache_decisions(timestamp DESC);
+        ALTER TABLE cache_decisions ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'live';
       `);
 
       // 7. system_events table
@@ -160,10 +174,12 @@ export class MigrationRunner {
           object_id VARCHAR(128),
           score NUMERIC(5,4),
           reason TEXT NOT NULL,
-          metadata JSONB
+          metadata JSONB,
+          source VARCHAR(32) DEFAULT 'live'
         );
         CREATE INDEX IF NOT EXISTS idx_system_events_time ON system_events(timestamp DESC);
         CREATE INDEX IF NOT EXISTS idx_system_events_type ON system_events(event_type, timestamp DESC);
+        ALTER TABLE system_events ADD COLUMN IF NOT EXISTS source VARCHAR(32) DEFAULT 'live';
       `);
 
       // 8. workload_runs table
@@ -217,16 +233,39 @@ export class MigrationRunner {
         CREATE TABLE IF NOT EXISTS object_observations (
           id BIGSERIAL PRIMARY KEY,
           object_id VARCHAR(128) NOT NULL,
+          product_name VARCHAR(255),
+          category VARCHAR(100),
+          location VARCHAR(128),
+          price NUMERIC(10,2),
+          previous_price NUMERIC(10,2),
+          price_change_pct NUMERIC(6,2) DEFAULT 0.00,
           timestamp BIGINT NOT NULL,
+          source VARCHAR(64) DEFAULT 'live',
+          source_reference VARCHAR(128),
+          data_status VARCHAR(32) DEFAULT 'COMMITTED',
           request_count INT NOT NULL DEFAULT 1,
           demand NUMERIC(10,2) NOT NULL DEFAULT 1.00,
-          price NUMERIC(10,2),
           inventory INT,
           backend_latency INT NOT NULL DEFAULT 0,
           retrieval_cost INT NOT NULL DEFAULT 0,
-          response_size INT NOT NULL DEFAULT 0
+          response_size INT NOT NULL DEFAULT 0,
+          created_at TIMESTAMPTZ DEFAULT NOW()
         );
         CREATE INDEX IF NOT EXISTS idx_object_observations_obj_time ON object_observations(object_id, timestamp DESC);
+        CREATE INDEX IF NOT EXISTS idx_object_observations_src ON object_observations(source);
+      `);
+
+      // Upgrade existing object_observations table columns if present
+      await dbClient.query(`
+        ALTER TABLE object_observations ADD COLUMN IF NOT EXISTS product_name VARCHAR(255);
+        ALTER TABLE object_observations ADD COLUMN IF NOT EXISTS category VARCHAR(100);
+        ALTER TABLE object_observations ADD COLUMN IF NOT EXISTS location VARCHAR(128);
+        ALTER TABLE object_observations ADD COLUMN IF NOT EXISTS previous_price NUMERIC(10,2);
+        ALTER TABLE object_observations ADD COLUMN IF NOT EXISTS price_change_pct NUMERIC(6,2) DEFAULT 0.00;
+        ALTER TABLE object_observations ADD COLUMN IF NOT EXISTS source VARCHAR(64) DEFAULT 'live';
+        ALTER TABLE object_observations ADD COLUMN IF NOT EXISTS source_reference VARCHAR(128);
+        ALTER TABLE object_observations ADD COLUMN IF NOT EXISTS data_status VARCHAR(32) DEFAULT 'COMMITTED';
+        ALTER TABLE object_observations ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
       `);
 
       // 11. benchmark_runs table
@@ -304,11 +343,182 @@ export class MigrationRunner {
         CREATE INDEX IF NOT EXISTS idx_cost_records_time ON cost_records(timestamp DESC);
       `);
 
-      console.log('[Migrations] All 14 PostgreSQL tables, indexes, and foreign keys created successfully.');
+      console.log('[Migrations] All 14 PostgreSQL tables, indexes, and foreign keys verified.');
+
+      // Seed Product Catalog and Historical Baselines
+      await this.seedCommodities();
+      await this.seedHistoricalBaseline();
+
       return true;
     } catch (err: any) {
       console.error('[Migrations] Migration failed:', err.message);
       return false;
+    }
+  }
+
+  /**
+   * Seed realistic commodity catalog into PostgreSQL cache_objects and object_observations
+   */
+  public static async seedCommodities(): Promise<void> {
+    if (!dbClient.isConnected) return;
+    try {
+      console.log(`[Migrations] Seeding ${COMMODITY_CATALOG.length} realistic commodity items into PostgreSQL...`);
+      for (const item of COMMODITY_CATALOG) {
+        const payload = {
+          id: item.objectId,
+          name: item.name,
+          category: item.category,
+          location: item.location,
+          price: item.price,
+          previousPrice: item.previousPrice,
+          priceChangePct: item.priceChangePct,
+          unit: item.unit,
+          specs: item.specs,
+          description: item.description,
+          source: 'postgresql_origin',
+          updatedAt: Date.now(),
+        };
+
+        await dbClient.query(
+          `INSERT INTO cache_objects (object_id, key, name, category, payload, size_bytes, base_retrieval_cost_ms, compute_complexity, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+           ON CONFLICT (object_id) DO UPDATE SET
+             name = EXCLUDED.name,
+             category = EXCLUDED.category,
+             payload = EXCLUDED.payload,
+             size_bytes = EXCLUDED.size_bytes,
+             base_retrieval_cost_ms = EXCLUDED.base_retrieval_cost_ms,
+             compute_complexity = EXCLUDED.compute_complexity,
+             updated_at = NOW()`,
+          [
+            item.objectId,
+            `cache:obj:${item.objectId}`,
+            item.name,
+            item.category,
+            JSON.stringify(payload),
+            item.sizeBytes,
+            item.baseRetrievalCostMs,
+            item.computeComplexity,
+          ]
+        );
+      }
+      console.log(`[Migrations] Commodity catalog seeded successfully in PostgreSQL.`);
+    } catch (err: any) {
+      console.warn('[Migrations] Commodity seed warning:', err.message);
+    }
+  }
+
+  /**
+   * Seed deterministic historical baseline requests and observations (source = 'seeded_demo')
+   */
+  public static async seedHistoricalBaseline(): Promise<void> {
+    if (!dbClient.isConnected) return;
+    try {
+      // Check if historical records already exist
+      const checkRes = await dbClient.query(
+        `SELECT COUNT(*) AS total FROM request_logs WHERE source = 'seeded_demo'`
+      );
+      const count = parseInt(checkRes.rows[0].total, 10);
+      if (count >= 20) {
+        return; // Already seeded
+      }
+
+      console.log('[Migrations] Seeding deterministic historical request logs and observations (source = seeded_demo)...');
+      const now = Date.now();
+      const commodities = COMMODITY_CATALOG.slice(0, 10);
+
+      for (let i = 0; i < commodities.length; i++) {
+        const item = commodities[i];
+        const pastTime = now - ((commodities.length - i) * 60000); // 1-minute steps into past
+
+        // 1. Observation record
+        await dbClient.query(
+          `INSERT INTO object_observations (
+            object_id, product_name, category, location, price, previous_price, price_change_pct,
+            timestamp, source, source_reference, data_status, request_count, demand, backend_latency, retrieval_cost, response_size
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+          [
+            item.objectId,
+            item.name,
+            item.category,
+            item.location,
+            item.price,
+            item.previousPrice || item.price,
+            item.priceChangePct || 0,
+            pastTime,
+            'seeded_demo',
+            'APMC_MARKET_FEED_HISTORICAL',
+            'COMMITTED',
+            10 + (i * 3),
+            1.2 + (i * 0.1),
+            item.baseRetrievalCostMs,
+            item.baseRetrievalCostMs,
+            item.sizeBytes,
+          ]
+        );
+
+        // 2. Historical request log
+        await dbClient.query(
+          `INSERT INTO request_logs (
+            request_id, timestamp, object_id, operation, response_size_bytes,
+            cache_hit, backend_called, backend_latency_ms, cache_latency_ms,
+            total_latency_ms, status_code, strategy_used, source, mode
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+          ON CONFLICT (request_id) DO NOTHING`,
+          [
+            `HIST-REQ-${item.objectId}-001`,
+            pastTime,
+            item.objectId,
+            'GET',
+            item.sizeBytes,
+            true,
+            false,
+            0,
+            2,
+            2,
+            200,
+            'ADAPTIVE',
+            'seeded_demo',
+            'historical',
+          ]
+        );
+
+        // 3. Historical decision
+        await dbClient.query(
+          `INSERT INTO cache_decisions (
+            id, object_id, decision_type, adaptive_score, factors,
+            previous_ttl, new_ttl, predicted_demand, confidence, reason, timestamp, source
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+          ON CONFLICT (id) DO NOTHING`,
+          [
+            `HIST-DEC-${item.objectId}-001`,
+            item.objectId,
+            'KEEP',
+            0.75,
+            JSON.stringify({
+              frequency: 0.8,
+              recency: 0.7,
+              trend: 0.75,
+              retrievalCost: item.baseRetrievalCostMs / 450,
+              backendPressure: 0.2,
+              memoryCost: 0.05,
+              predictedDemand: 0.15,
+              confidence: 0.85,
+              finalScore: 0.75,
+            }),
+            300,
+            420,
+            0.15,
+            0.85,
+            `Historical baseline: active commodity demand and stable origin response (${item.baseRetrievalCostMs}ms).`,
+            pastTime,
+            'seeded_demo',
+          ]
+        );
+      }
+      console.log('[Migrations] Deterministic historical baseline initialized successfully.');
+    } catch (err: any) {
+      console.warn('[Migrations] Historical baseline seed warning:', err.message);
     }
   }
 
@@ -396,4 +606,3 @@ export class MigrationRunner {
     }
   }
 }
-

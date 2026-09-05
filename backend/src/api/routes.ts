@@ -32,7 +32,26 @@ apiRouter.get('/health', (req: Request, res: Response) => healthController.getHe
 apiRouter.get('/system/health', (req: Request, res: Response) => healthController.getHealth(req, res));
 apiRouter.get('/system/db', (req: Request, res: Response) => healthController.getDbStatus(req, res));
 
-// --- Dashboard & Telemetry ---
+// --- Realistic Products Catalog ---
+apiRouter.get('/products', (req: Request, res: Response) => cacheController.getProducts(req, res));
+apiRouter.get('/products/:objectId', (req: Request, res: Response) => cacheController.getProductById(req, res));
+
+// --- Cache Objects, Operational Request Flow & Invalidation ---
+apiRouter.get('/cache/objects', (req: Request, res: Response) => cacheController.getCacheObjects(req, res));
+apiRouter.get('/cache/:objectId', (req: Request, res: Response) => cacheController.executeRequest(req, res));
+apiRouter.post('/cache/request/:id', (req: Request, res: Response) => cacheController.executeRequest(req, res));
+apiRouter.post('/cache/invalidate/:objectId', (req: Request, res: Response) => cacheController.invalidateObject(req, res));
+apiRouter.post('/cache/flush', (req: Request, res: Response) => cacheController.flushCache(req, res));
+
+// --- Dashboard, Metrics & Historical Data ---
+apiRouter.get('/metrics', (req: Request, res: Response) => {
+  const snapshot = telemetry.getSnapshot();
+  res.json({
+    success: true,
+    data: snapshot,
+  });
+});
+
 apiRouter.get('/dashboard/metrics', (req: Request, res: Response) => {
   const snapshot = telemetry.getSnapshot();
   res.json({
@@ -40,6 +59,8 @@ apiRouter.get('/dashboard/metrics', (req: Request, res: Response) => {
     data: snapshot,
   });
 });
+
+apiRouter.get('/history', (req: Request, res: Response) => cacheController.getHistory(req, res));
 
 apiRouter.get('/telemetry', async (req: Request, res: Response) => {
   const snapshot = telemetry.getSnapshot();
@@ -53,14 +74,14 @@ apiRouter.get('/telemetry', async (req: Request, res: Response) => {
   });
 });
 
-// --- Cache Objects & Inspection ---
-apiRouter.get('/cache/objects', (req: Request, res: Response) => cacheController.getCacheObjects(req, res));
-apiRouter.post('/cache/flush', (req: Request, res: Response) => cacheController.flushCache(req, res));
-apiRouter.post('/cache/request/:id', (req: Request, res: Response) => cacheController.executeRequest(req, res));
-
 // --- Decisions & Explainability ---
+apiRouter.get('/decisions', (req: Request, res: Response) => cacheController.getDecisions(req, res));
 apiRouter.get('/cache/decisions', (req: Request, res: Response) => cacheController.getDecisions(req, res));
 apiRouter.get('/cache/decisions/:id/explain', (req: Request, res: Response) => cacheController.getDecisionExplanation(req, res));
+
+// --- Activity Stream & Audit Events ---
+apiRouter.get('/activity', (req: Request, res: Response) => cacheController.getEvents(req, res));
+apiRouter.get('/cache/events', (req: Request, res: Response) => cacheController.getEvents(req, res));
 
 // --- Time-Series Observations & Change Detection (Phase 5) ---
 apiRouter.post('/observations/record', (req: Request, res: Response) => observationController.recordObservation(req, res));
@@ -68,15 +89,13 @@ apiRouter.get('/observations', (req: Request, res: Response) => observationContr
 apiRouter.get('/observations/:objectId', (req: Request, res: Response) => observationController.getObjectObservations(req, res));
 apiRouter.get('/observations/:objectId/changes', (req: Request, res: Response) => observationController.getObjectChanges(req, res));
 
-// --- Activity Stream & Audit Events ---
-apiRouter.get('/cache/events', (req: Request, res: Response) => cacheController.getEvents(req, res));
-
 // --- Traffic Lab & Workload Ingestion ---
 apiRouter.post('/workloads/upload', upload.single('file'), (req: Request, res: Response) => workloadController.uploadWorkload(req, res));
 apiRouter.get('/workloads', (req: Request, res: Response) => workloadController.getWorkloadRuns(req, res));
 apiRouter.get('/workloads/:id', (req: Request, res: Response) => workloadController.getWorkloadRunById(req, res));
 apiRouter.delete('/workloads/:id', (req: Request, res: Response) => workloadController.deleteWorkloadRun(req, res));
 apiRouter.post('/workloads/start', (req: Request, res: Response) => workloadController.startWorkload(req, res));
+apiRouter.post('/workload/run', (req: Request, res: Response) => workloadController.startWorkload(req, res));
 apiRouter.post('/workloads/stop', (req: Request, res: Response) => workloadController.stopWorkload(req, res));
 apiRouter.get('/workloads/active', (req: Request, res: Response) => workloadController.getActiveWorkload(req, res));
 apiRouter.post('/workloads/:id/replay', (req: Request, res: Response) => workloadController.replayWorkload(req, res));
@@ -109,4 +128,3 @@ apiRouter.get('/demo/scenarios', (req: Request, res: Response) => demoController
 // --- System Configuration & Policies ---
 apiRouter.get('/settings', (req: Request, res: Response) => settingsController.getSettings(req, res));
 apiRouter.put('/settings', (req: Request, res: Response) => settingsController.updateSettings(req, res));
-

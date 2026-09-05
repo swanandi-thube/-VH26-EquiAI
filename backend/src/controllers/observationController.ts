@@ -73,10 +73,10 @@ export class ObservationController {
     const factors = scorer.calculateFactors(
       {
         objectId,
-        accessCount: observation.requestCount,
-        retrievalCostMs: observation.retrievalCostMs,
-        backendLatencyMs: observation.backendLatencyMs,
-        sizeBytes: observation.responseSizeBytes,
+        accessCount: observation.requestCount ?? 1,
+        retrievalCostMs: observation.retrievalCostMs ?? 50,
+        backendLatencyMs: observation.backendLatencyMs ?? 50,
+        sizeBytes: observation.responseSizeBytes ?? 1024,
         predictedDemand: changeResult.demandChange,
         confidence: 0.85,
       },
@@ -85,7 +85,7 @@ export class ObservationController {
         poolUtilization: pool.utilization,
         queueDepth: pool.connectionQueueDepth,
         errorRate: 0,
-        avgBackendLatencyMs: observation.backendLatencyMs,
+        avgBackendLatencyMs: observation.backendLatencyMs ?? 50,
       }
     );
 
@@ -93,13 +93,13 @@ export class ObservationController {
       {
         objectId,
         key: cacheKey,
-        sizeBytes: observation.responseSizeBytes,
+        sizeBytes: observation.responseSizeBytes ?? 1024,
         createdAt: observation.timestamp,
         lastAccessed: observation.timestamp,
-        accessCount: observation.requestCount,
-        recentAccessCount: observation.requestCount,
-        retrievalCostMs: observation.retrievalCostMs,
-        backendLatencyMs: observation.backendLatencyMs,
+        accessCount: observation.requestCount ?? 1,
+        recentAccessCount: observation.requestCount ?? 1,
+        retrievalCostMs: observation.retrievalCostMs ?? 50,
+        backendLatencyMs: observation.backendLatencyMs ?? 50,
         ttlSeconds: changeResult.recommendedTtlSeconds || 300,
         remainingTtlSeconds: cachedItem.hit ? cachedItem.metadata?.remainingTtlSeconds || 300 : 0,
         expiresAt: Date.now() + ((changeResult.recommendedTtlSeconds || 300) * 1000),

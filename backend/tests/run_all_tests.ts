@@ -12,10 +12,11 @@ import { lifecycle } from '../src/engine/lifecycle';
 import { predictor } from '../src/engine/predictor';
 import { benchmarkEngine } from '../src/benchmark/engine';
 import { costEngine } from '../src/engine/cost';
+import { pipeline } from '../src/pipeline';
 import { cacheService } from '../src/services/cacheService';
-import { requestLogRepository, workloadRepository } from '../src/repositories';
+import { requestLogRepository, workloadRepository, cacheObjectRepository } from '../src/repositories';
 import { telemetry } from '../src/telemetry';
-import { IOriginDataSource } from '../src/services/originAdapter';
+import { IOriginDataSource, defaultOriginAdapter } from '../src/services/originAdapter';
 import { workloadIngestionService } from '../src/services/workloadIngestionService';
 import { explainability } from '../src/engine/explainability';
 import { changeDetector } from '../src/engine/changeDetector';
@@ -1371,6 +1372,115 @@ async function runTests() {
 
   const liveLogsCheck = await requestLogRepository.getRecent(50, 'live');
   assert(liveLogsCheck.some(l => l.requestId === 'REQ-LIVE-PERMANENT-99'), '19.13e CRITICAL: Live request logs were PRESERVED and NOT deleted by demo reset');
+
+  // =========================================================================
+  // Test Suite 20: Real Backend, Database Persistence & Operational Flow
+  // =========================================================================
+  console.log('\n--- Test Suite 20: Real Backend, Database Persistence & Operational Flow ---');
+  cacheService.setOriginAdapter(defaultOriginAdapter);
+  rateLimiter.reset();
+  rateLimiter.setLimit(500, 500);
+  circuitBreaker.reset();
+
+  // 20.1 Health Endpoint Live Check
+  const healthCheck = await redisCache.checkHealth();
+  const dbHealthCheck = await dbClient.checkHealth();
+  assert(healthCheck.status === 'CONNECTED' || healthCheck.status === 'OFFLINE', '20.1a Redis health status checked without error');
+  assert(dbHealthCheck.status === 'CONNECTED' || dbHealthCheck.status === 'OFFLINE', '20.1b PostgreSQL health status checked without error');
+
+  // 20.2 Product Catalog Retrieval (Realistic Commodities)
+  const products = await cacheObjectRepository.findAll(50, 0);
+  assert(products.length >= 30, `20.2a Realistic commodity catalog contains >= 30 products (got ${products.length})`);
+  const onionObj = await cacheObjectRepository.findById('ONION_001');
+  assert(onionObj !== null, '20.2b ONION_001 found in catalog');
+  assert(onionObj?.category === 'Fresh Vegetables', '20.2c ONION_001 has valid category');
+  assert(onionObj?.payload?.location === 'Lasalgaon, Nashik', '20.2d ONION_001 has realistic location');
+
+  const riceObj = await cacheObjectRepository.findById('RICE_001');
+  assert(riceObj !== null && riceObj.name.includes('Basmati'), '20.2e RICE_001 found in catalog with Basmati name');
+
+  // 20.3 Redis MISS Test on ONION_001
+  // Ensure Redis is clean for ONION_001
+  await redisCache.del('cache:obj:ONION_001');
+  const req1Start = Date.now();
+  const req1Result = await pipeline.processRequest('ONION_001', undefined, undefined, 'live');
+  assert(req1Result.statusCode === 200, '20.3a First request for ONION_001 returns HTTP 200');
+  assert(req1Result.cacheHit === false, '20.3b First request produces Redis MISS');
+  assert(req1Result.backendCalled === true, '20.3c First request calls backend / database');
+  assert(req1Result.backendLatencyMs > 0, `20.3d Measured backend latency > 0 (${req1Result.backendLatencyMs}ms)`);
+  assert(req1Result.data !== null && req1Result.data.id === 'ONION_001', '20.3e Database object returned in response payload');
+
+  // Verify Redis was SET with the object
+  const redisCheckReq1 = await redisCache.get('cache:obj:ONION_001');
+  assert(redisCheckReq1.hit === true, '20.3f Redis SET confirmed: ONION_001 is now resident in cache');
+  assert(Boolean(redisCheckReq1.metadata?.ttlSeconds && redisCheckReq1.metadata.ttlSeconds > 0), '20.3g Dynamic TTL assigned in Redis metadata');
+
+  // 20.4 Redis HIT Test on ONION_001
+  const req2Result = await pipeline.processRequest('ONION_001', undefined, undefined, 'live');
+  assert(req2Result.statusCode === 200, '20.4a Second request for ONION_001 returns HTTP 200');
+  assert(req2Result.cacheHit === true, '20.4b Second request produces Redis HIT');
+  assert(req2Result.backendCalled === false, '20.4c Second request does NOT call backend / database');
+  assert(req2Result.totalLatencyMs <= 20, `20.4d Cache HIT latency is fast (got ${req2Result.totalLatencyMs}ms)`);
+  assert(req2Result.data !== null && req2Result.data.id === 'ONION_001', '20.4e Cached data matches requested object');
+
+  // 20.5 Database Persistence Verification (request_logs)
+  const recentLiveLogs = await requestLogRepository.getRecent(10, 'live');
+  assert(recentLiveLogs.length >= 2, '20.5a Both requests persisted to request_logs');
+  const onionLogs = recentLiveLogs.filter(l => l.objectId === 'ONION_001');
+  assert(onionLogs.some(l => l.cacheHit === false && l.backendCalled === true), '20.5b MISS request logged accurately');
+  assert(onionLogs.some(l => l.cacheHit === true && l.backendCalled === false), '20.5c HIT request logged accurately');
+
+  // 20.6 Cache Access & Decision Persistence
+  const recentDecisions = await decisionRepository.getRecent(10);
+  assert(recentDecisions.length > 0, '20.6a Decisions persisted to cache_decisions');
+  const onionDecision = recentDecisions.find(d => d.objectId === 'ONION_001');
+  assert(onionDecision !== undefined, '20.6b Adaptive decision persisted for ONION_001');
+  assert(Boolean(onionDecision?.reason && onionDecision.reason.length > 10), `20.6c Decision includes descriptive explanation: "${onionDecision?.reason}"`);
+  assert(Boolean(onionDecision?.adaptiveScore !== undefined && onionDecision.adaptiveScore > 0), `20.6d Adaptive score computed: ${onionDecision?.adaptiveScore}`);
+
+  // 20.7 Live vs Historical Metrics Breakdown
+  const metricsBreakdown = await requestLogRepository.getMetricsBreakdown();
+  assert(typeof metricsBreakdown.live.totalRequests === 'number', '20.7a Live total requests computed');
+  assert(typeof metricsBreakdown.historical.totalRequests === 'number', '20.7b Historical total requests computed');
+  assert(typeof metricsBreakdown.total.totalRequests === 'number', '20.7c Combined persistent totals computed');
+  assert(metricsBreakdown.total.totalRequests >= metricsBreakdown.live.totalRequests, '20.7d Total requests >= Live requests');
+
+  // 20.8 Invalid Object ID (404 Handling)
+  const invalidResult = await pipeline.processRequest('NON_EXISTENT_COMMODITY_999', undefined, undefined, 'live');
+  assert(invalidResult.statusCode === 404, '20.8a Non-existent commodity returns HTTP 404');
+  assert(invalidResult.data === null, '20.8b No data returned for 404');
+  assert(invalidResult.cacheHit === false, '20.8c 404 is not a cache hit');
+
+  // 20.9 Singleflight Request Coalescing (Cache Miss Storm Defense)
+  await redisCache.del('cache:obj:POTATO_001');
+  const concurrentMisses = await Promise.all([
+    pipeline.processRequest('POTATO_001', 50, undefined, 'live'),
+    pipeline.processRequest('POTATO_001', 50, undefined, 'live'),
+    pipeline.processRequest('POTATO_001', 50, undefined, 'live'),
+  ]);
+  assert(concurrentMisses.every(r => r.statusCode === 200), '20.9a All concurrent requests succeeded');
+  const coalescedMissCount = concurrentMisses.filter(r => r.wasCoalesced).length;
+  console.log(`       [Coalescing Result]: ${coalescedMissCount} of 3 requests coalesced into single origin fetch.`);
+
+  // 20.10 Circuit Breaker State Transitions
+  circuitBreaker.reset();
+  assert(circuitBreaker.getState() === 'CLOSED', '20.10a Circuit Breaker starts CLOSED');
+  // Record failures to trip circuit
+  for (let i = 0; i < 15; i++) {
+    circuitBreaker.recordResult(false);
+  }
+  assert(circuitBreaker.getState() === 'OPEN', '20.10b Circuit Breaker tripped to OPEN after error burst');
+  assert(circuitBreaker.canExecute() === false, '20.10c Execution blocked when OPEN');
+  circuitBreaker.reset();
+  assert(circuitBreaker.getState() === 'CLOSED', '20.10d Circuit Breaker reset back to CLOSED');
+
+  // 20.11 Manual Cache Invalidation
+  await redisCache.set('cache:obj:TOMATO_001', JSON.stringify({ name: 'Tomato' }), { objectId: 'TOMATO_001' });
+  const tomatoBefore = await redisCache.get('cache:obj:TOMATO_001');
+  assert(tomatoBefore.hit === true, '20.11a TOMATO_001 is in cache');
+  await redisCache.del('cache:obj:TOMATO_001');
+  const tomatoAfter = await redisCache.get('cache:obj:TOMATO_001');
+  assert(tomatoAfter.hit === false, '20.11b TOMATO_001 successfully invalidated from cache');
 
   console.log('\n========================================================');
   console.log(`  TEST RESULTS: ${passed} PASSED, ${failed} FAILED`);

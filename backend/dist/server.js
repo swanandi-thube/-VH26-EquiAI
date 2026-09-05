@@ -18,11 +18,31 @@ const server_1 = require("./ws/server");
 const telemetry_1 = require("./telemetry");
 const migrations_1 = require("./database/migrations");
 const client_1 = require("./database/client");
+const healthController_1 = require("./controllers/healthController");
 const app = (0, express_1.default)();
 const PORT = config_1.config.port;
+// Support comma-separated origins, wildcard, Netlify frontend, and localhost development origins
+const getAllowedCors = (originSetting) => {
+    if (!originSetting || originSetting === '*')
+        return true;
+    const origins = originSetting.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+    return (origin, callback) => {
+        if (!origin)
+            return callback(null, true);
+        const reqOrigin = origin.toLowerCase();
+        const isAllowed = origins.some(allowed => allowed === '*' ||
+            reqOrigin === allowed ||
+            reqOrigin.includes(allowed.replace(/^https?:\/\//, '')));
+        callback(null, isAllowed);
+    };
+};
 // Enable CORS and JSON body parser
-app.use((0, cors_1.default)({ origin: config_1.config.corsOrigin }));
+app.use((0, cors_1.default)({ origin: getAllowedCors(config_1.config.corsOrigin), credentials: true }));
 app.use(express_1.default.json());
+// Production Health Endpoints
+app.get('/health', (req, res) => healthController_1.healthController.getHealth(req, res));
+app.get('/api/health', (req, res) => healthController_1.healthController.getHealth(req, res));
+app.get('/api/system/health', (req, res) => healthController_1.healthController.getHealth(req, res));
 // API Routes
 app.use('/api', routes_1.apiRouter);
 // Prometheus Metrics Scrape Endpoint

@@ -13,7 +13,7 @@ class ChangeDetector {
      */
     analyze(objectId, currentObs, history = []) {
         const timestamp = currentObs.timestamp || Date.now();
-        const currentDemand = currentObs.demand;
+        const currentDemand = currentObs.demand ?? 1.0;
         // Filter and sort history ascending by timestamp
         const sortedHistory = [...history]
             .filter(h => h.objectId === objectId && h.timestamp <= timestamp)
@@ -24,7 +24,7 @@ class ChangeDetector {
             sortedHistory.push(currentObs);
         }
         const sampleWindows = sortedHistory.length;
-        const historySummary = sortedHistory.map(h => Math.round(h.demand * 100) / 100);
+        const historySummary = sortedHistory.map(h => Math.round((h.demand ?? 1.0) * 100) / 100);
         if (sampleWindows <= 1) {
             // Single observation - default to stable
             return {
@@ -46,7 +46,7 @@ class ChangeDetector {
         }
         // Previous point and baseline
         const prevObs = sortedHistory[sortedHistory.length - 2];
-        const previousDemand = prevObs.demand;
+        const previousDemand = prevObs.demand ?? 1.0;
         // 1. Calculate Deltas
         // ΔD: Demand change percentage
         const demandChange = previousDemand > 0
@@ -82,7 +82,7 @@ class ChangeDetector {
             let sumXX = 0;
             for (let i = 0; i < n; i++) {
                 const x = i;
-                const y = sortedHistory[i].demand;
+                const y = sortedHistory[i].demand ?? 1.0;
                 sumX += x;
                 sumY += y;
                 sumXY += x * y;
@@ -98,13 +98,13 @@ class ChangeDetector {
         // 3. Pattern Detection Classification
         let detectedPattern = 'STABLE_DEMAND';
         const isMonotonicallyIncreasing = sortedHistory.length >= 3 && sortedHistory.every((val, i, arr) => {
-            return i === 0 || val.demand >= arr[i - 1].demand;
-        }) && sortedHistory[sortedHistory.length - 1].demand > sortedHistory[0].demand;
+            return i === 0 || (val.demand ?? 1.0) >= (arr[i - 1]?.demand ?? 1.0);
+        }) && (sortedHistory[sortedHistory.length - 1]?.demand ?? 1.0) > (sortedHistory[0]?.demand ?? 1.0);
         const isMonotonicallyDecreasing = sortedHistory.length >= 3 && sortedHistory.every((val, i, arr) => {
-            return i === 0 || val.demand <= arr[i - 1].demand;
-        }) && sortedHistory[sortedHistory.length - 1].demand < sortedHistory[0].demand;
+            return i === 0 || (val.demand ?? 1.0) <= (arr[i - 1]?.demand ?? 1.0);
+        }) && (sortedHistory[sortedHistory.length - 1]?.demand ?? 1.0) < (sortedHistory[0]?.demand ?? 1.0);
         // Check for acute spike (>= +100% jump or massive surge relative to baseline)
-        const baselineDemand = sortedHistory[0].demand;
+        const baselineDemand = sortedHistory[0]?.demand ?? 1.0;
         const totalGrowthRatio = baselineDemand > 0 ? (currentDemand - baselineDemand) / baselineDemand : 0;
         if (demandChange >= 1.0 || (totalGrowthRatio >= 2.0 && demandChange > 0.5)) {
             detectedPattern = 'DEMAND_SPIKE';
@@ -130,7 +130,7 @@ class ChangeDetector {
                 ttlMultiplier = 2.5; // Proactively hold in cache during surge
                 break;
             case 'INCREASING_TREND':
-                recommendedDecision = currentObs.retrievalCostMs > 100 ? 'PRE-CACHE' : 'KEEP';
+                recommendedDecision = (currentObs.retrievalCostMs ?? 50) > 100 ? 'PRE-CACHE' : 'KEEP';
                 ttlMultiplier = 1.6;
                 break;
             case 'DEMAND_DECLINE':

@@ -22,7 +22,23 @@ exports.apiRouter = (0, express_1.Router)();
 exports.apiRouter.get('/health', (req, res) => controllers_1.healthController.getHealth(req, res));
 exports.apiRouter.get('/system/health', (req, res) => controllers_1.healthController.getHealth(req, res));
 exports.apiRouter.get('/system/db', (req, res) => controllers_1.healthController.getDbStatus(req, res));
-// --- Dashboard & Telemetry ---
+// --- Realistic Products Catalog ---
+exports.apiRouter.get('/products', (req, res) => controllers_1.cacheController.getProducts(req, res));
+exports.apiRouter.get('/products/:objectId', (req, res) => controllers_1.cacheController.getProductById(req, res));
+// --- Cache Objects, Operational Request Flow & Invalidation ---
+exports.apiRouter.get('/cache/objects', (req, res) => controllers_1.cacheController.getCacheObjects(req, res));
+exports.apiRouter.get('/cache/:objectId', (req, res) => controllers_1.cacheController.executeRequest(req, res));
+exports.apiRouter.post('/cache/request/:id', (req, res) => controllers_1.cacheController.executeRequest(req, res));
+exports.apiRouter.post('/cache/invalidate/:objectId', (req, res) => controllers_1.cacheController.invalidateObject(req, res));
+exports.apiRouter.post('/cache/flush', (req, res) => controllers_1.cacheController.flushCache(req, res));
+// --- Dashboard, Metrics & Historical Data ---
+exports.apiRouter.get('/metrics', (req, res) => {
+    const snapshot = telemetry_1.telemetry.getSnapshot();
+    res.json({
+        success: true,
+        data: snapshot,
+    });
+});
 exports.apiRouter.get('/dashboard/metrics', (req, res) => {
     const snapshot = telemetry_1.telemetry.getSnapshot();
     res.json({
@@ -30,6 +46,7 @@ exports.apiRouter.get('/dashboard/metrics', (req, res) => {
         data: snapshot,
     });
 });
+exports.apiRouter.get('/history', (req, res) => controllers_1.cacheController.getHistory(req, res));
 exports.apiRouter.get('/telemetry', async (req, res) => {
     const snapshot = telemetry_1.telemetry.getSnapshot();
     const recentLogs = await repositories_1.requestLogRepository.getRecent(100);
@@ -41,26 +58,25 @@ exports.apiRouter.get('/telemetry', async (req, res) => {
         },
     });
 });
-// --- Cache Objects & Inspection ---
-exports.apiRouter.get('/cache/objects', (req, res) => controllers_1.cacheController.getCacheObjects(req, res));
-exports.apiRouter.post('/cache/flush', (req, res) => controllers_1.cacheController.flushCache(req, res));
-exports.apiRouter.post('/cache/request/:id', (req, res) => controllers_1.cacheController.executeRequest(req, res));
 // --- Decisions & Explainability ---
+exports.apiRouter.get('/decisions', (req, res) => controllers_1.cacheController.getDecisions(req, res));
 exports.apiRouter.get('/cache/decisions', (req, res) => controllers_1.cacheController.getDecisions(req, res));
 exports.apiRouter.get('/cache/decisions/:id/explain', (req, res) => controllers_1.cacheController.getDecisionExplanation(req, res));
+// --- Activity Stream & Audit Events ---
+exports.apiRouter.get('/activity', (req, res) => controllers_1.cacheController.getEvents(req, res));
+exports.apiRouter.get('/cache/events', (req, res) => controllers_1.cacheController.getEvents(req, res));
 // --- Time-Series Observations & Change Detection (Phase 5) ---
 exports.apiRouter.post('/observations/record', (req, res) => controllers_1.observationController.recordObservation(req, res));
 exports.apiRouter.get('/observations', (req, res) => controllers_1.observationController.getAllObservations(req, res));
 exports.apiRouter.get('/observations/:objectId', (req, res) => controllers_1.observationController.getObjectObservations(req, res));
 exports.apiRouter.get('/observations/:objectId/changes', (req, res) => controllers_1.observationController.getObjectChanges(req, res));
-// --- Activity Stream & Audit Events ---
-exports.apiRouter.get('/cache/events', (req, res) => controllers_1.cacheController.getEvents(req, res));
 // --- Traffic Lab & Workload Ingestion ---
 exports.apiRouter.post('/workloads/upload', upload.single('file'), (req, res) => controllers_1.workloadController.uploadWorkload(req, res));
 exports.apiRouter.get('/workloads', (req, res) => controllers_1.workloadController.getWorkloadRuns(req, res));
 exports.apiRouter.get('/workloads/:id', (req, res) => controllers_1.workloadController.getWorkloadRunById(req, res));
 exports.apiRouter.delete('/workloads/:id', (req, res) => controllers_1.workloadController.deleteWorkloadRun(req, res));
 exports.apiRouter.post('/workloads/start', (req, res) => controllers_1.workloadController.startWorkload(req, res));
+exports.apiRouter.post('/workload/run', (req, res) => controllers_1.workloadController.startWorkload(req, res));
 exports.apiRouter.post('/workloads/stop', (req, res) => controllers_1.workloadController.stopWorkload(req, res));
 exports.apiRouter.get('/workloads/active', (req, res) => controllers_1.workloadController.getActiveWorkload(req, res));
 exports.apiRouter.post('/workloads/:id/replay', (req, res) => controllers_1.workloadController.replayWorkload(req, res));
