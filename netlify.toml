@@ -1,0 +1,11 @@
+# Netlify Configuration for AdaptiveCache Frontend
+[build]
+  base = "frontend"
+  publish = "dist"
+  command = "npm run build"
+
+# Single Page App (SPA) Redirect Rule
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
