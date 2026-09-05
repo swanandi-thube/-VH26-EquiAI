@@ -91,20 +91,27 @@ else {
 const server = http_1.default.createServer(app);
 // Attach WebSocket server
 server_1.wsService.init(server);
-// Run DB migrations and start listening
-migrations_1.MigrationRunner.runMigrations().catch((err) => {
-    console.warn('[Startup] Migration initialization note:', err.message);
-});
-server.listen(PORT, () => {
-    console.log('================================================================');
-    console.log('  ADAPTIVECACHE - Intelligent Caching & Backend Protection Platform');
-    console.log('================================================================');
-    console.log(`  ✓ Dashboard UI & REST API: http://localhost:${PORT}/`);
-    console.log(`  ✓ Health API Endpoint:     http://localhost:${PORT}/api/system/health`);
-    console.log(`  ✓ WebSocket Stream:        ws://localhost:${PORT}/ws`);
-    console.log(`  ✓ Prometheus Metrics:      http://localhost:${PORT}/metrics`);
-    console.log('================================================================');
-});
+async function startServer() {
+    // 1. Run DB migrations before opening HTTP port
+    try {
+        await migrations_1.MigrationRunner.runMigrations();
+    }
+    catch (err) {
+        console.warn('[Startup] Migration initialization note:', err.message);
+    }
+    // 2. Start HTTP server
+    server.listen(PORT, () => {
+        console.log('================================================================');
+        console.log('  ADAPTIVECACHE - Intelligent Caching & Backend Protection Platform');
+        console.log('================================================================');
+        console.log(`  ✓ Dashboard UI & REST API: http://localhost:${PORT}/`);
+        console.log(`  ✓ Health API Endpoint:     http://localhost:${PORT}/api/system/health`);
+        console.log(`  ✓ WebSocket Stream:        ws://localhost:${PORT}/ws`);
+        console.log(`  ✓ Prometheus Metrics:      http://localhost:${PORT}/metrics`);
+        console.log('================================================================');
+    });
+}
+startServer();
 // Graceful Shutdown
 process.on('SIGTERM', async () => {
     console.log('SIGTERM signal received. Closing HTTP server and database pool...');

@@ -96,21 +96,28 @@ const server = http.createServer(app);
 // Attach WebSocket server
 wsService.init(server);
 
-// Run DB migrations and start listening
-MigrationRunner.runMigrations().catch((err) => {
-  console.warn('[Startup] Migration initialization note:', err.message);
-});
+async function startServer() {
+  // 1. Run DB migrations before opening HTTP port
+  try {
+    await MigrationRunner.runMigrations();
+  } catch (err: any) {
+    console.warn('[Startup] Migration initialization note:', err.message);
+  }
 
-server.listen(PORT, () => {
-  console.log('================================================================');
-  console.log('  ADAPTIVECACHE - Intelligent Caching & Backend Protection Platform');
-  console.log('================================================================');
-  console.log(`  ✓ Dashboard UI & REST API: http://localhost:${PORT}/`);
-  console.log(`  ✓ Health API Endpoint:     http://localhost:${PORT}/api/system/health`);
-  console.log(`  ✓ WebSocket Stream:        ws://localhost:${PORT}/ws`);
-  console.log(`  ✓ Prometheus Metrics:      http://localhost:${PORT}/metrics`);
-  console.log('================================================================');
-});
+  // 2. Start HTTP server
+  server.listen(PORT, () => {
+    console.log('================================================================');
+    console.log('  ADAPTIVECACHE - Intelligent Caching & Backend Protection Platform');
+    console.log('================================================================');
+    console.log(`  ✓ Dashboard UI & REST API: http://localhost:${PORT}/`);
+    console.log(`  ✓ Health API Endpoint:     http://localhost:${PORT}/api/system/health`);
+    console.log(`  ✓ WebSocket Stream:        ws://localhost:${PORT}/ws`);
+    console.log(`  ✓ Prometheus Metrics:      http://localhost:${PORT}/metrics`);
+    console.log('================================================================');
+  });
+}
+
+startServer();
 
 // Graceful Shutdown
 process.on('SIGTERM', async () => {
