@@ -3,29 +3,22 @@
   "version": "1.0.0",
   "description": "AdaptiveCache - Application-Aware Intelligent Caching & Backend Protection Platform",
   "private": true,
-  "workspaces": [
-    "backend",
-    "frontend"
-  ],
   "scripts": {
-    "install:all": "npm install --workspace=backend && npm install --workspace=frontend",
-    "dev:backend": "npm run dev --workspace=backend",
-    "dev:frontend": "npm run dev --workspace=frontend",
-    "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"cyan,magenta\" \"npm run dev --workspace=backend\" \"npm run dev --workspace=frontend\"",
-    "build:frontend": "npm run build --workspace=frontend",
-    "build:backend": "npm run build --workspace=backend",
+    "install:backend": "npm --prefix backend install",
+    "install:frontend": "npm --prefix frontend install",
+    "install:all": "npm --prefix backend install && npm --prefix frontend install",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"cyan,magenta\" \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
+    "build:frontend": "npm --prefix frontend run build",
+    "build:backend": "npm --prefix backend run build",
     "build": "npm run build:backend && npm run build:frontend",
     "start": "node backend/dist/server.js",
-    "test": "npm run test --workspace=backend"
+    "test": "npm --prefix backend test"
   },
-  "dependencies": {
-    "@types/node": "^22.10.7",
-    "typescript": "^5.7.3"
-  },
+  "dependencies": {},
   "devDependencies": {
-    "@types/node": "^22.10.7",
-    "concurrently": "^9.1.2",
-    "typescript": "^5.7.3"
+    "concurrently": "^9.1.2"
   },
   "keywords": [
     "cache",
